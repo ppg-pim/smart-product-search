@@ -150,8 +150,8 @@ Response: {
       searchParams.searchType = "all"
     }
 
-    // Step 3: Build Supabase query
-    let queryBuilder = supabase.from('products').select('*')
+    // Step 3: Build Supabase query - START WITH BASE QUERY
+    let dbQuery = supabase.from('products').select('*')
 
     // Apply filters based on search type
     if (searchParams.filters.length > 0) {
@@ -186,33 +186,39 @@ Response: {
         }).filter(Boolean)
         
         if (orConditions.length > 0) {
-          queryBuilder = queryBuilder.or(orConditions.join(','))
+          dbQuery = dbQuery.or(orConditions.join(','))
           console.log('OR conditions:', orConditions.join(','))
         }
       } else {
-        // AND logic - chain filters
-        for (const filter of searchParams.filters) {
+        // AND logic - apply filters one by one WITHOUT reassignment in loop
+        const validFilters = searchParams.filters.filter((filter: any) => 
+          columns.includes(filter.column)
+        )
+        
+        for (const filter of validFilters) {
           const { column, operator, value } = filter
-          
-          if (!columns.includes(column)) {
-            console.warn(`Column "${column}" not found`)
-            continue
-          }
-          
           console.log(`Applying filter: ${column} ${operator} ${value}`)
           
-          if (operator === 'eq') {
-            queryBuilder = queryBuilder.eq(column, value)
-          } else if (operator === 'ilike') {
-            queryBuilder = queryBuilder.ilike(column, value)
-          } else if (operator === 'gt') {
-            queryBuilder = queryBuilder.gt(column, value)
-          } else if (operator === 'lt') {
-            queryBuilder = queryBuilder.lt(column, value)
-          } else if (operator === 'gte') {
-            queryBuilder = queryBuilder.gte(column, value)
-          } else if (operator === 'lte') {
-            queryBuilder = queryBuilder.lte(column, value)
+          // Apply each filter by chaining
+          switch (operator) {
+            case 'eq':
+              dbQuery = dbQuery.eq(column, value)
+              break
+            case 'ilike':
+              dbQuery = dbQuery.ilike(column, value)
+              break
+            case 'gt':
+              dbQuery = dbQuery.gt(column, value)
+              break
+            case 'lt':
+              dbQuery = dbQuery.lt(column, value)
+              break
+            case 'gte':
+              dbQuery = dbQuery.gte(column, value)
+              break
+            case 'lte':
+              dbQuery = dbQuery.lte(column, value)
+              break
           }
         }
       }
@@ -222,7 +228,7 @@ Response: {
 
     // Apply ordering
     if (searchParams.orderBy?.column && columns.includes(searchParams.orderBy.column)) {
-      queryBuilder = queryBuilder.order(
+      dbQuery = dbQuery.order(
         searchParams.orderBy.column,
         { ascending: searchParams.orderBy.ascending ?? true }
       )
@@ -230,10 +236,10 @@ Response: {
 
     // Apply limit
     const limit = searchParams.limit || 50
-    queryBuilder = queryBuilder.limit(limit)
+    dbQuery = dbQuery.limit(limit)
 
     // Execute query
-    const { data, error } = await queryBuilder
+    const { data, error } = await dbQuery
 
     if (error) {
       console.error('Supabase error:', error)
