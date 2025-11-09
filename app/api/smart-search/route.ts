@@ -6,6 +6,21 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
+interface Filter {
+  column: string
+  operator: 'eq' | 'ilike' | 'gt' | 'lt' | 'gte' | 'lte'
+  value: string | number
+}
+
+interface SearchParams {
+  filters?: Filter[]
+  orderBy?: {
+    column: string
+    ascending: boolean
+  }
+  limit?: number
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { query } = await request.json()
@@ -68,53 +83,59 @@ If no specific filters are needed, return empty filters array to get all product
       response_format: { type: 'json_object' }
     })
 
-    const searchParams = JSON.parse(completion.choices[0].message.content || '{}')
+    const searchParams: SearchParams = JSON.parse(
+      completion.choices[0].message.content || '{}'
+    )
 
-    // Step 3: Build and execute Supabase query
-    let supabaseQuery = supabase.from('products').select('*')
+    // Step 3: Build Supabase query using .or() and string-based filters
+    let queryString = '*'
+    const limit = searchParams.limit || 20
 
-    // Apply filters
+    // Build the query
+    let dbQuery = supabase.from('products').select(queryString)
+
+    // Apply filters using a different approach to avoid type issues
     if (searchParams.filters && searchParams.filters.length > 0) {
-      searchParams.filters.forEach((filter: any) => {
+      for (const filter of searchParams.filters) {
         const { column, operator, value } = filter
         
+        // Use type assertion to bypass the deep type checking
         switch (operator) {
           case 'eq':
-            supabaseQuery = supabaseQuery.eq(column, value)
+            dbQuery = dbQuery.eq(column as any, value)
             break
           case 'ilike':
-            supabaseQuery = supabaseQuery.ilike(column, value)
+            dbQuery = dbQuery.ilike(column as any, value as string)
             break
           case 'gt':
-            supabaseQuery = supabaseQuery.gt(column, value)
+            dbQuery = dbQuery.gt(column as any, value)
             break
           case 'lt':
-            supabaseQuery = supabaseQuery.lt(column, value)
+            dbQuery = dbQuery.lt(column as any, value)
             break
           case 'gte':
-            supabaseQuery = supabaseQuery.gte(column, value)
+            dbQuery = dbQuery.gte(column as any, value)
             break
           case 'lte':
-            supabaseQuery = supabaseQuery.lte(column, value)
+            dbQuery = dbQuery.lte(column as any, value)
             break
         }
-      })
+      }
     }
 
     // Apply ordering
     if (searchParams.orderBy) {
-      supabaseQuery = supabaseQuery.order(
-        searchParams.orderBy.column,
+      dbQuery = dbQuery.order(
+        searchParams.orderBy.column as any,
         { ascending: searchParams.orderBy.ascending }
       )
     }
 
     // Apply limit
-    const limit = searchParams.limit || 20
-    supabaseQuery = supabaseQuery.limit(limit)
+    dbQuery = dbQuery.limit(limit)
 
     // Execute query
-    const { data, error } = await supabaseQuery
+    const { data, error } = await dbQuery
 
     if (error) {
       throw new Error(`Database error: ${error.message}`)
