@@ -255,7 +255,7 @@ Response: {
         error: error.message || 'Internal server error',
         details: error.toString()
       },
-      { status: "500 }
+      { status: 500 }
     )
   }
 }
