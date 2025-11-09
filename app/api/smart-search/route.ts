@@ -114,12 +114,14 @@ OrderBy structure (optional):
     }
 
     // Step 3: Build and execute Supabase query
-    let supabaseQuery = supabase.from('products').select('*')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let supabaseQuery: any = supabase.from('products').select('*')
 
     // Apply filters
     if (searchParams.filters.length > 0) {
       console.log('Applying filters:', searchParams.filters)
       
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       searchParams.filters.forEach((filter: any) => {
         const { column, operator, value } = filter
         
