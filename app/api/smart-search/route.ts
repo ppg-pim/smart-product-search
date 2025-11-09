@@ -217,4 +217,52 @@ Response: {
             case 'gte':
               supabaseQuery = supabaseQuery.gte(column, value)
               break
-            case 'l
+            case 'lte':
+              supabaseQuery = supabaseQuery.lte(column, value)
+              break
+          }
+        })
+      }
+    } else {
+      console.log('No filters - returning all products')
+    }
+
+    // Apply ordering
+    if (searchParams.orderBy?.column && columns.includes(searchParams.orderBy.column)) {
+      supabaseQuery = supabaseQuery.order(
+        searchParams.orderBy.column,
+        { ascending: searchParams.orderBy.ascending ?? true }
+      )
+    }
+
+    // Apply limit
+    const limit = searchParams.limit || 50
+    supabaseQuery = supabaseQuery.limit(limit)
+
+    // Execute query
+    const { data, error } = await supabaseQuery
+
+    if (error) {
+      console.error('Supabase error:', error)
+      throw new Error(`Database error: ${error.message}`)
+    }
+
+    console.log(`Query returned ${data?.length || 0} results`)
+
+    return NextResponse.json({
+      success: true,
+      results: data,
+      count: data?.length || 0
+    })
+
+  } catch (error: any) {
+    console.error('Smart search error:', error)
+    return NextResponse.json(
+      { 
+        error: error.message || 'Internal server error',
+        details: error.toString()
+      },
+      { status: 500 }
+    )
+  }
+}
