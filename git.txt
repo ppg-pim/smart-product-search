@@ -1,0 +1,7 @@
+echo "# smart-product-search" >> README.md
+git init
+git add README.md
+git commit -m "first commit"
+git branch -M main
+git remote add origin https://github.com/ppg-pim/smart-product-search.git
+git push -u origin main
