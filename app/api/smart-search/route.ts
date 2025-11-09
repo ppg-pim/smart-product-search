@@ -151,7 +151,7 @@ Response: {
     }
 
     // Step 3: Build Supabase query
-    let supabaseQuery = supabase.from('products').select('*')
+    let queryBuilder = supabase.from('products').select('*')
 
     // Apply filters based on search type
     if (searchParams.filters.length > 0) {
@@ -186,42 +186,35 @@ Response: {
         }).filter(Boolean)
         
         if (orConditions.length > 0) {
-          supabaseQuery = supabaseQuery.or(orConditions.join(','))
+          queryBuilder = queryBuilder.or(orConditions.join(','))
           console.log('OR conditions:', orConditions.join(','))
         }
       } else {
         // AND logic - chain filters
-        searchParams.filters.forEach((filter: any) => {
+        for (const filter of searchParams.filters) {
           const { column, operator, value } = filter
           
           if (!columns.includes(column)) {
             console.warn(`Column "${column}" not found`)
-            return
+            continue
           }
           
           console.log(`Applying filter: ${column} ${operator} ${value}`)
           
-          switch (operator) {
-            case 'eq':
-              supabaseQuery = supabaseQuery.eq(column, value)
-              break
-            case 'ilike':
-              supabaseQuery = supabaseQuery.ilike(column, value)
-              break
-            case 'gt':
-              supabaseQuery = supabaseQuery.gt(column, value)
-              break
-            case 'lt':
-              supabaseQuery = supabaseQuery.lt(column, value)
-              break
-            case 'gte':
-              supabaseQuery = supabaseQuery.gte(column, value)
-              break
-            case 'lte':
-              supabaseQuery = supabaseQuery.lte(column, value)
-              break
+          if (operator === 'eq') {
+            queryBuilder = queryBuilder.eq(column, value)
+          } else if (operator === 'ilike') {
+            queryBuilder = queryBuilder.ilike(column, value)
+          } else if (operator === 'gt') {
+            queryBuilder = queryBuilder.gt(column, value)
+          } else if (operator === 'lt') {
+            queryBuilder = queryBuilder.lt(column, value)
+          } else if (operator === 'gte') {
+            queryBuilder = queryBuilder.gte(column, value)
+          } else if (operator === 'lte') {
+            queryBuilder = queryBuilder.lte(column, value)
           }
-        })
+        }
       }
     } else {
       console.log('No filters - returning all products')
@@ -229,7 +222,7 @@ Response: {
 
     // Apply ordering
     if (searchParams.orderBy?.column && columns.includes(searchParams.orderBy.column)) {
-      supabaseQuery = supabaseQuery.order(
+      queryBuilder = queryBuilder.order(
         searchParams.orderBy.column,
         { ascending: searchParams.orderBy.ascending ?? true }
       )
@@ -237,10 +230,10 @@ Response: {
 
     // Apply limit
     const limit = searchParams.limit || 50
-    supabaseQuery = supabaseQuery.limit(limit)
+    queryBuilder = queryBuilder.limit(limit)
 
     // Execute query
-    const { data, error } = await supabaseQuery
+    const { data, error } = await queryBuilder
 
     if (error) {
       console.error('Supabase error:', error)
@@ -262,7 +255,7 @@ Response: {
         error: error.message || 'Internal server error',
         details: error.toString()
       },
-      { status: 500 }
+      { status: "500 }
     )
   }
 }
