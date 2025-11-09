@@ -172,7 +172,7 @@ Response: {
   "searchType": "any",
   "questionType": "specific",
   "extractFields": ["sku", "price", "name"],
-  "answerTemplate": "The price of {sku} is ${price}",
+  "answerTemplate": "The price of {sku} is {price}",
   "limit": 1
 }
 
