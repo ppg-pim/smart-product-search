@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 // Utility function to decode HTML entities AND strip HTML tags
 const decodeHtml = (html: string): string => {
@@ -33,6 +33,12 @@ const truncateText = (text: string, maxLength: number = 150): string => {
   return text.substring(0, maxLength) + '...'
 }
 
+// Truncate search history display
+const truncateSearchQuery = (text: string, maxLength: number = 30): string => {
+  if (!text || text.length <= maxLength) return text
+  return text.substring(0, maxLength) + '...'
+}
+
 export default function Home() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<any[]>([])
@@ -40,6 +46,35 @@ export default function Home() {
   const [extractedData, setExtractedData] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [searchHistory, setSearchHistory] = useState<string[]>([])
+
+  // Load search history from localStorage on mount
+  useEffect(() => {
+    const savedHistory = localStorage.getItem('searchHistory')
+    if (savedHistory) {
+      try {
+        setSearchHistory(JSON.parse(savedHistory))
+      } catch (e) {
+        console.error('Failed to parse search history', e)
+      }
+    }
+  }, [])
+
+  // Save search to history
+  const addToHistory = (searchQuery: string) => {
+    if (!searchQuery.trim()) return
+    
+    setSearchHistory(prev => {
+      // Remove duplicates and add to front
+      const filtered = prev.filter(q => q !== searchQuery)
+      const newHistory = [searchQuery, ...filtered].slice(0, 5) // Keep only last 5
+      
+      // Save to localStorage
+      localStorage.setItem('searchHistory', JSON.stringify(newHistory))
+      
+      return newHistory
+    })
+  }
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -51,6 +86,9 @@ export default function Home() {
     setResults([])
     setSpecificAnswer(null)
     setExtractedData(null)
+
+    // Add to search history
+    addToHistory(query)
 
     try {
       const response = await fetch('/api/smart-search', {
@@ -91,6 +129,21 @@ export default function Home() {
     }, 100)
   }
 
+  const clearHistory = () => {
+    setSearchHistory([])
+    localStorage.removeItem('searchHistory')
+  }
+
+  // Icon mapping for different search types
+  const getSearchIcon = (query: string): string => {
+    const lowerQuery = query.toLowerCase()
+    if (lowerQuery.includes('color') || lowerQuery.includes('colour')) return '🎨'
+    if (lowerQuery.includes('price')) return '💰'
+    if (lowerQuery.includes('all')) return '📦'
+    if (lowerQuery.includes('what') || lowerQuery.includes('?')) return '❓'
+    return '🔍'
+  }
+
   return (
     <main className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto bg-gradient-to-br from-blue-50 to-indigo-50">
       <div className="bg-white rounded-xl shadow-lg p-6 md:p-8 mb-8">
@@ -128,32 +181,53 @@ export default function Home() {
           </div>
         </form>
 
-        <div className="flex gap-2 flex-wrap">
-          <button
-            onClick={() => handleQuickSearch('Show me all products')}
-            className="px-4 py-2 text-sm bg-blue-100 hover:bg-blue-200 rounded-full text-blue-700 font-medium transition-colors"
-          >
-            📦 All products
-          </button>
-          <button
-            onClick={() => handleQuickSearch('What is the color of 0890A1/2AM012PTSAL')}
-            className="px-4 py-2 text-sm bg-purple-100 hover:bg-purple-200 rounded-full text-purple-700 font-medium transition-colors"
-          >
-            🎨 Color of 0890A1/2AM012PTSAL
-          </button>
-          <button
-            onClick={() => handleQuickSearch('Show me PS 870')}
-            className="px-4 py-2 text-sm bg-indigo-100 hover:bg-indigo-200 rounded-full text-indigo-700 font-medium transition-colors"
-          >
-            🔍 PS 870
-          </button>
-          <button
-            onClick={() => handleQuickSearch('Products under $100')}
-            className="px-4 py-2 text-sm bg-green-100 hover:bg-green-200 rounded-full text-green-700 font-medium transition-colors"
-          >
-            💰 Under $100
-          </button>
-        </div>
+        {/* Search History */}
+        {searchHistory.length > 0 ? (
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs text-gray-500 font-medium">Recent Searches:</p>
+              <button
+                onClick={clearHistory}
+                className="text-xs text-red-500 hover:text-red-700 font-medium"
+              >
+                Clear History
+              </button>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              {searchHistory.map((historyQuery, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleQuickSearch(historyQuery)}
+                  className="px-4 py-2 text-sm bg-gradient-to-r from-blue-100 to-indigo-100 hover:from-blue-200 hover:to-indigo-200 rounded-full text-blue-700 font-medium transition-all shadow-sm hover:shadow-md"
+                  title={historyQuery}
+                >
+                  {getSearchIcon(historyQuery)} {truncateSearchQuery(historyQuery)}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => handleQuickSearch('Show me all products')}
+              className="px-4 py-2 text-sm bg-blue-100 hover:bg-blue-200 rounded-full text-blue-700 font-medium transition-colors"
+            >
+              📦 All products
+            </button>
+            <button
+              onClick={() => handleQuickSearch('What is the color of 0890A1/2AM012PTSAL')}
+              className="px-4 py-2 text-sm bg-purple-100 hover:bg-purple-200 rounded-full text-purple-700 font-medium transition-colors"
+            >
+              🎨 Color of 0890A1/2AM012PTSAL
+            </button>
+            <button
+              onClick={() => handleQuickSearch('Show me PS 870')}
+              className="px-4 py-2 text-sm bg-indigo-100 hover:bg-indigo-200 rounded-full text-indigo-700 font-medium transition-colors"
+            >
+              🔍 PS 870
+            </button>
+          </div>
+        )}
       </div>
 
       {error && (

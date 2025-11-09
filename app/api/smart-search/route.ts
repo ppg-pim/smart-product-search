@@ -102,6 +102,7 @@ SEARCH RULES:
 4. When user mentions a product code, create MULTIPLE filters with "or" logic by returning separate filter objects
 5. Always look for the most relevant columns based on the query
 6. **IMPORTANT**: If user asks a SPECIFIC QUESTION about a product (like "what is the color", "what is the price", "what is the description"), set "questionType" to "specific" and specify which fields to extract
+7. **DO NOT SET LIMIT** - Return all matching results (set limit to null or 10000)
 
 RESPONSE FORMAT (JSON):
 {
@@ -120,13 +121,14 @@ RESPONSE FORMAT (JSON):
     "column": "column_name",
     "ascending": true
   },
-  "limit": 20
+  "limit": null
 }
 
 - "questionType": "list" = show full product cards (default)
 - "questionType": "specific" = answer a specific question with extracted data
 - "extractFields": array of column names to extract for specific questions
 - "answerTemplate": how to format the answer (use {fieldname} placeholders)
+- "limit": null or 10000 for all results, 1 for specific questions
 
 EXAMPLES:
 
@@ -135,7 +137,7 @@ Response: {
   "filters": [], 
   "searchType": "all", 
   "questionType": "list",
-  "limit": 20
+  "limit": null
 }
 
 Query: "Show me PS 870 products"
@@ -147,7 +149,7 @@ Response: {
   ],
   "searchType": "any",
   "questionType": "list",
-  "limit": 20
+  "limit": null
 }
 
 Query: "What is the color of 0890A1/2AM012PTSAL"
@@ -199,10 +201,10 @@ Response: {
 
     let searchParams
     try {
-      searchParams = JSON.parse(completion.choices[0].message.content || '{"filters": [], "searchType": "all", "questionType": "list", "limit": 20}')
+      searchParams = JSON.parse(completion.choices[0].message.content || '{"filters": [], "searchType": "all", "questionType": "list", "limit": null}')
     } catch (parseError) {
       console.error('Failed to parse GPT response:', completion.choices[0].message.content)
-      searchParams = { filters: [], searchType: "all", questionType: "list", limit: 20 }
+      searchParams = { filters: [], searchType: "all", questionType: "list", limit: null }
     }
 
     console.log('Parsed search params:', JSON.stringify(searchParams, null, 2))
@@ -278,9 +280,10 @@ Response: {
       )
     }
 
-    // Apply limit
-    const limit = searchParams.limit || 50
+    // Apply limit - default to 10000 (effectively all) for list queries, or use specified limit
+    const limit = searchParams.limit || (searchParams.questionType === "specific" ? 1 : 10000)
     dbQuery = dbQuery.limit(limit)
+    console.log(`Applying limit: ${limit}`)
 
     // Execute query
     const { data, error } = await dbQuery
