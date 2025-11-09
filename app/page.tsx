@@ -2,10 +2,29 @@
 
 import { useState } from 'react'
 
-// Utility function to strip HTML tags
-const stripHtml = (html: string): string => {
+// Utility function to decode HTML entities AND strip HTML tags
+const decodeHtml = (html: string): string => {
   if (typeof html !== 'string') return String(html)
-  return html.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim()
+  
+  // Create a temporary element to decode HTML entities
+  const txt = document.createElement('textarea')
+  txt.innerHTML = html
+  let decoded = txt.value
+  
+  // Now strip any remaining HTML tags
+  decoded = decoded.replace(/<[^>]*>/g, '')
+  
+  // Replace common entities that might not decode properly
+  decoded = decoded
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&deg;/g, '°')
+  
+  return decoded.trim()
 }
 
 // Utility function to truncate long text
@@ -17,6 +36,8 @@ const truncateText = (text: string, maxLength: number = 150): string => {
 export default function Home() {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<any[]>([])
+  const [specificAnswer, setSpecificAnswer] = useState<string | null>(null)
+  const [extractedData, setExtractedData] = useState<any>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -28,6 +49,8 @@ export default function Home() {
     setLoading(true)
     setError('')
     setResults([])
+    setSpecificAnswer(null)
+    setExtractedData(null)
 
     try {
       const response = await fetch('/api/smart-search', {
@@ -44,7 +67,14 @@ export default function Home() {
         throw new Error(data.error || 'Search failed')
       }
 
-      setResults(data.results || [])
+      // Handle specific question response
+      if (data.questionType === 'specific') {
+        setSpecificAnswer(data.answer)
+        setExtractedData(data.extractedData)
+      } else {
+        // Handle list response
+        setResults(data.results || [])
+      }
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -68,7 +98,7 @@ export default function Home() {
           🔍 Smart Product Search
         </h1>
         <p className="text-center text-gray-600 mb-6">
-          Search using natural language - try "PS 870", "products under $50", or "show all"
+          Ask questions or search products - try "What is the color of 0890A1/2AM012PTSAL?" or "Show me PS 870"
         </p>
 
         <form onSubmit={handleSearch} className="mb-4">
@@ -77,7 +107,7 @@ export default function Home() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="e.g., Show me PS 870 products, Find items under $50..."
+              placeholder="e.g., What is the color of 0890A1/2AM012PTSAL?, Show me PS 870..."
               className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-gray-800"
             />
             <button
@@ -106,8 +136,14 @@ export default function Home() {
             📦 All products
           </button>
           <button
-            onClick={() => handleQuickSearch('Show me PS 870')}
+            onClick={() => handleQuickSearch('What is the color of 0890A1/2AM012PTSAL')}
             className="px-4 py-2 text-sm bg-purple-100 hover:bg-purple-200 rounded-full text-purple-700 font-medium transition-colors"
+          >
+            🎨 Color of 0890A1/2AM012PTSAL
+          </button>
+          <button
+            onClick={() => handleQuickSearch('Show me PS 870')}
+            className="px-4 py-2 text-sm bg-indigo-100 hover:bg-indigo-200 rounded-full text-indigo-700 font-medium transition-colors"
           >
             🔍 PS 870
           </button>
@@ -133,6 +169,40 @@ export default function Home() {
         </div>
       )}
 
+      {/* Specific Answer Display */}
+      {!loading && specificAnswer && (
+        <div className="mb-6">
+          <div className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white p-8 rounded-xl shadow-xl">
+            <div className="flex items-start gap-4">
+              <div className="text-4xl">💡</div>
+              <div className="flex-1">
+                <h2 className="text-2xl font-bold mb-3">Answer</h2>
+                <p className="text-xl leading-relaxed">{decodeHtml(specificAnswer)}</p>
+                
+                {extractedData && Object.keys(extractedData).length > 0 && (
+                  <div className="mt-6 pt-6 border-t border-white/30">
+                    <h3 className="text-lg font-semibold mb-3">Extracted Information:</h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {Object.entries(extractedData).map(([key, value]) => (
+                        <div key={key} className="bg-white/10 backdrop-blur rounded-lg p-3">
+                          <div className="text-sm font-medium opacity-90 capitalize">
+                            {key.replace(/_/g, ' ')}
+                          </div>
+                          <div className="text-lg font-semibold mt-1">
+                            {decodeHtml(String(value))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Product List Display */}
       {!loading && results.length > 0 && (
         <div>
           <div className="mb-6 flex items-center justify-between bg-white p-4 rounded-lg shadow">
@@ -152,7 +222,7 @@ export default function Home() {
                   if (value === null || value === undefined) return null
                   
                   const stringValue = String(value)
-                  const cleanValue = stripHtml(stringValue)
+                  const cleanValue = decodeHtml(stringValue)
                   const displayValue = truncateText(cleanValue, 200)
                   
                   // Highlight important fields
@@ -163,7 +233,7 @@ export default function Home() {
                       <div className={`font-semibold capitalize mb-1 ${isImportant ? 'text-blue-700 text-lg' : 'text-gray-700 text-sm'}`}>
                         {key.replace(/_/g, ' ')}
                       </div>
-                      <div className="text-gray-600 break-words">
+                      <div className="text-gray-600 break-words whitespace-pre-wrap">
                         {displayValue || 'N/A'}
                       </div>
                     </div>
@@ -175,7 +245,7 @@ export default function Home() {
         </div>
       )}
 
-      {!loading && results.length === 0 && query && !error && (
+      {!loading && results.length === 0 && !specificAnswer && query && !error && (
         <div className="text-center py-16 bg-white rounded-xl shadow-lg">
           <div className="text-6xl mb-4">🔍</div>
           <p className="text-gray-500 text-xl font-semibold">No results found</p>
