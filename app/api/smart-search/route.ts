@@ -6,6 +6,39 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
+// Helper function to build query string for OR conditions
+function buildOrConditions(filters: any[], columns: string[]): string | null {
+  const orConditions = filters
+    .map((filter: any) => {
+      const { column, operator, value } = filter
+      
+      if (!columns.includes(column)) {
+        console.warn(`Column "${column}" not found`)
+        return null
+      }
+      
+      switch (operator) {
+        case 'eq':
+          return `${column}.eq.${value}`
+        case 'ilike':
+          return `${column}.ilike.${value}`
+        case 'gt':
+          return `${column}.gt.${value}`
+        case 'lt':
+          return `${column}.lt.${value}`
+        case 'gte':
+          return `${column}.gte.${value}`
+        case 'lte':
+          return `${column}.lte.${value}`
+        default:
+          return null
+      }
+    })
+    .filter(Boolean)
+  
+  return orConditions.length > 0 ? orConditions.join(',') : null
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { query } = await request.json()
@@ -150,8 +183,8 @@ Response: {
       searchParams.searchType = "all"
     }
 
-    // Step 3: Build Supabase query - START WITH BASE QUERY
-    let dbQuery = supabase.from('products').select('*')
+    // Step 3: Build Supabase query with type assertion to avoid deep instantiation
+    let dbQuery: any = supabase.from('products').select('*')
 
     // Apply filters based on search type
     if (searchParams.filters.length > 0) {
@@ -159,38 +192,14 @@ Response: {
       
       if (searchParams.searchType === "any") {
         // OR logic - use Supabase's .or() method
-        const orConditions = searchParams.filters.map((filter: any) => {
-          const { column, operator, value } = filter
-          
-          if (!columns.includes(column)) {
-            console.warn(`Column "${column}" not found`)
-            return null
-          }
-          
-          switch (operator) {
-            case 'eq':
-              return `${column}.eq.${value}`
-            case 'ilike':
-              return `${column}.ilike.${value}`
-            case 'gt':
-              return `${column}.gt.${value}`
-            case 'lt':
-              return `${column}.lt.${value}`
-            case 'gte':
-              return `${column}.gte.${value}`
-            case 'lte':
-              return `${column}.lte.${value}`
-            default:
-              return null
-          }
-        }).filter(Boolean)
+        const orConditionString = buildOrConditions(searchParams.filters, columns)
         
-        if (orConditions.length > 0) {
-          dbQuery = dbQuery.or(orConditions.join(','))
-          console.log('OR conditions:', orConditions.join(','))
+        if (orConditionString) {
+          dbQuery = dbQuery.or(orConditionString)
+          console.log('OR conditions:', orConditionString)
         }
       } else {
-        // AND logic - apply filters one by one WITHOUT reassignment in loop
+        // AND logic - apply filters sequentially
         const validFilters = searchParams.filters.filter((filter: any) => 
           columns.includes(filter.column)
         )
@@ -199,7 +208,6 @@ Response: {
           const { column, operator, value } = filter
           console.log(`Applying filter: ${column} ${operator} ${value}`)
           
-          // Apply each filter by chaining
           switch (operator) {
             case 'eq':
               dbQuery = dbQuery.eq(column, value)
@@ -228,6 +236,7 @@ Response: {
 
     // Apply ordering
     if (searchParams.orderBy?.column && columns.includes(searchParams.orderBy.column)) {
+      console.log(`Ordering by: ${searchParams.orderBy.column}`)
       dbQuery = dbQuery.order(
         searchParams.orderBy.column,
         { ascending: searchParams.orderBy.ascending ?? true }
