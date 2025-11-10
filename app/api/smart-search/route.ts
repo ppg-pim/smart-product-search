@@ -96,20 +96,22 @@ SAMPLE DATA:
 ${JSON.stringify(samplePreview, null, 2)}
 
 SEARCH RULES:
-1. For product codes/SKUs (like "PS 870", "SKU 123", "0890A1/2AM012PTSAL"), search in BOTH the SKU column AND any name/title/description columns using partial matches
-2. For text searches, use "ilike" with wildcards: "%search%"
-3. For numeric comparisons, use: gt, lt, gte, lte
-4. When user mentions a product code, create MULTIPLE filters with "or" logic by returning separate filter objects
-5. Always look for the most relevant columns based on the query
-6. **IMPORTANT**: If user asks a SPECIFIC QUESTION about a product (like "what is the color", "what is the price", "what is the description"), set "questionType" to "specific" and specify which fields to extract
-7. **DO NOT SET LIMIT** - Return all matching results (set limit to null or 10000)
+1. **EXACT SKU MATCH**: When user says "show details of [SKU]", "find [SKU]", "details of [SKU]", use EXACT match with "eq" operator on the SKU column
+2. **PARTIAL SKU SEARCH**: When user says "show me products with [partial code]", "search for [code]", use "ilike" with wildcards
+3. For text searches in descriptions/names, use "ilike" with wildcards: "%search%"
+4. For numeric comparisons, use: gt, lt, gte, lte
+5. **IMPORTANT**: Detect the user's intent:
+   - "show details of X" = EXACT match, questionType: "list", limit: 1
+   - "what is the color of X" = EXACT match, questionType: "specific"
+   - "show me products with X" = PARTIAL match, questionType: "list", limit: null
+   - "find all X" = PARTIAL match, questionType: "list", limit: null
 
 RESPONSE FORMAT (JSON):
 {
   "filters": [
     {
       "column": "column_name",
-      "operator": "ilike" | "eq" | "gt" | "lt" | "gte" | "lte",
+      "operator": "eq" | "ilike" | "gt" | "lt" | "gte" | "lte",
       "value": "value"
     }
   ],
@@ -121,14 +123,15 @@ RESPONSE FORMAT (JSON):
     "column": "column_name",
     "ascending": true
   },
-  "limit": null
+  "limit": null | 1
 }
 
-- "questionType": "list" = show full product cards (default)
+- "questionType": "list" = show full product cards
 - "questionType": "specific" = answer a specific question with extracted data
 - "extractFields": array of column names to extract for specific questions
 - "answerTemplate": how to format the answer (use {fieldname} placeholders)
-- "limit": null or 10000 for all results, 1 for specific questions
+- "limit": null for all results, 1 for single product details or specific questions
+- **USE "eq" operator for exact SKU matches, "ilike" for partial searches**
 
 EXAMPLES:
 
@@ -140,12 +143,31 @@ Response: {
   "limit": null
 }
 
+Query: "Show the details of 0870A00276012PT"
+Response: {
+  "filters": [
+    {"column": "sku", "operator": "eq", "value": "0870A00276012PT"}
+  ],
+  "searchType": "all",
+  "questionType": "list",
+  "limit": 1
+}
+
+Query: "Find product 0890A1/2AM012PTSAL"
+Response: {
+  "filters": [
+    {"column": "sku", "operator": "eq", "value": "0890A1/2AM012PTSAL"}
+  ],
+  "searchType": "all",
+  "questionType": "list",
+  "limit": 1
+}
+
 Query: "Show me PS 870 products"
 Response: {
   "filters": [
     {"column": "sku", "operator": "ilike", "value": "%PS 870%"},
-    {"column": "sku", "operator": "ilike", "value": "%PS870%"},
-    {"column": "sku", "operator": "ilike", "value": "%870%"}
+    {"column": "sku", "operator": "ilike", "value": "%PS870%"}
   ],
   "searchType": "any",
   "questionType": "list",
@@ -155,10 +177,9 @@ Response: {
 Query: "What is the color of 0890A1/2AM012PTSAL"
 Response: {
   "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%0890A1/2AM012PTSAL%"},
-    {"column": "sku", "operator": "ilike", "value": "%0890A1%"}
+    {"column": "sku", "operator": "eq", "value": "0890A1/2AM012PTSAL"}
   ],
-  "searchType": "any",
+  "searchType": "all",
   "questionType": "specific",
   "extractFields": ["sku", "color", "colour", "name"],
   "answerTemplate": "The color of {sku} is {color}",
@@ -168,8 +189,7 @@ Response: {
 Query: "What is the price of PS 870"
 Response: {
   "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%PS 870%"},
-    {"column": "sku", "operator": "ilike", "value": "%PS870%"}
+    {"column": "sku", "operator": "ilike", "value": "%PS 870%"}
   ],
   "searchType": "any",
   "questionType": "specific",
@@ -178,16 +198,14 @@ Response: {
   "limit": 1
 }
 
-Query: "Tell me about product ABC123"
+Query: "Products containing 870"
 Response: {
   "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%ABC123%"}
+    {"column": "sku", "operator": "ilike", "value": "%870%"}
   ],
   "searchType": "any",
-  "questionType": "specific",
-  "extractFields": ["sku", "name", "description"],
-  "answerTemplate": "{sku} - {name}: {description}",
-  "limit": 1
+  "questionType": "list",
+  "limit": null
 }`
         },
         {
