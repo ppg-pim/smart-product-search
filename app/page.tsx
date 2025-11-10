@@ -430,8 +430,8 @@ export default function Home() {
 
       {!loading && results.length === 0 && query && !error && !specificAnswer && !comparisonData && (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-          <p className="text-gray-500 text-lg">No results found for "{query}"</p>
-          <p className="text-gray-400 text-sm mt-2">Try a different search term</p>
+          <p className="text-gray-500 text-lg">Your are searching for "{query}"</p>
+          <p className="text-gray-400 text-sm mt-2">Please press the search button to send the query to the system</p>
         </div>
       )}
     </main>
