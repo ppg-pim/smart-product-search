@@ -103,8 +103,7 @@ export default function Home() {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Ask anything... (e.g., 'Show me PS 870' or 'Find products with blue color')"
-              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:border-transparent"
-              style={{ focusRing: '#0078a9' }}
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
             />
             <button
               type="submit"
