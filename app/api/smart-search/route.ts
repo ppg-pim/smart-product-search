@@ -6,10 +6,9 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
-// Add this type definition
 type ProductRecord = Record<string, any>
 
-// Helper function to strip HTML tags
+// Enhanced HTML stripping with better entity handling
 function stripHtml(html: string): string {
   if (typeof html !== 'string') return html
   return html
@@ -20,6 +19,19 @@ function stripHtml(html: string): string {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&deg;/g, '°')
+    .replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(dec))
+    .replace(/&([a-z]+);/gi, (match, entity) => {
+      const entities: Record<string, string> = {
+        'nbsp': ' ',
+        'amp': '&',
+        'lt': '<',
+        'gt': '>',
+        'quot': '"',
+        'deg': '°',
+      }
+      return entities[entity.toLowerCase()] || match
+    })
     .trim()
 }
 
@@ -27,19 +39,15 @@ function stripHtml(html: string): string {
 function cleanProductData(product: ProductRecord): ProductRecord {
   const cleaned: ProductRecord = {}
   
-  // Fields to exclude
   const excludeFields = ['embedding', 'all_attributes']
   
-  // Process regular fields
   Object.keys(product).forEach(key => {
     if (excludeFields.includes(key)) return
     
     const value = product[key]
     
-    // Skip null, undefined, or empty string values
     if (value === null || value === undefined || value === '') return
     
-    // Strip HTML if it's a string
     if (typeof value === 'string') {
       const cleanedValue = stripHtml(value)
       if (cleanedValue) {
@@ -50,26 +58,21 @@ function cleanProductData(product: ProductRecord): ProductRecord {
     }
   })
   
-  // Parse and merge all_attributes if it exists
   if (product.all_attributes) {
     try {
       let attributes: ProductRecord = {}
       
-      // Handle if all_attributes is a string (JSON string)
       if (typeof product.all_attributes === 'string') {
         attributes = JSON.parse(product.all_attributes)
       } else if (typeof product.all_attributes === 'object') {
         attributes = product.all_attributes
       }
       
-      // Add individual attributes to cleaned object
       Object.keys(attributes).forEach(key => {
         const value = attributes[key]
         
-        // Skip empty values
         if (value === null || value === undefined || value === '') return
         
-        // Strip HTML from attribute values
         if (typeof value === 'string') {
           const cleanedValue = stripHtml(value)
           if (cleanedValue) {
@@ -145,7 +148,6 @@ export async function POST(request: NextRequest) {
       ? Object.keys(sampleData[0]) 
       : []
 
-    // Create a sample data preview for GPT to understand the data structure
     const samplePreview = sampleData?.slice(0, 2).map((item: ProductRecord) => {
       const preview: ProductRecord = {}
       Object.keys(item).forEach(key => {
@@ -162,7 +164,7 @@ export async function POST(request: NextRequest) {
     console.log('Available columns:', columns)
     console.log('User query:', query)
 
-    // Step 2: Use ChatGPT with improved prompting
+    // Step 2: Use ChatGPT to understand the query
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
@@ -176,60 +178,65 @@ Columns: ${columns.join(', ')}
 SAMPLE DATA:
 ${JSON.stringify(samplePreview, null, 2)}
 
-SEARCH RULES:
-1. **EXACT SKU MATCH**: When user provides a complete SKU (e.g., "0870A00276012PT"), use EXACT match with "eq" operator
-2. **PARTIAL SEARCH**: When user says "show me", "find", "search for" with partial terms, use "ilike" with wildcards
-3. **BROAD SEARCH**: When unsure, prefer broader searches with "ilike" and "any" (OR logic)
-4. **COMPARISON**: When user asks to compare, show difference, or contrast products, use "comparison" questionType
-5. For text searches, use "ilike" with wildcards: "%search%"
-6. **DEFAULT TO SHOWING RESULTS**: When in doubt, return results rather than being too restrictive
+IMPORTANT NOTES:
+- The "searchable_text" column contains ALL product information (flattened from all_attributes)
+- When searching for product attributes, ALWAYS include "searchable_text" in filters
+- For specific questions about attributes (color, cure time, etc.), search in "searchable_text"
 
-IMPORTANT INTENT DETECTION:
-- "show details of [EXACT_SKU]" → eq operator, limit: 1
-- "what is the [field] of [EXACT_SKU]" → eq operator, questionType: "specific"
-- "compare [SKU1] and [SKU2]" → questionType: "comparison", compareProducts: ["SKU1", "SKU2"]
-- "difference between [SKU1] and [SKU2]" → questionType: "comparison", compareProducts: ["SKU1", "SKU2"]
-- "show me [partial]" → ilike operator, searchType: "any", limit: null
-- "find [partial]" → ilike operator, searchType: "any", limit: null
-- "products with [term]" → ilike operator, searchType: "any", limit: null
-- "show all" → no filters, limit: null
+SEARCH RULES:
+1. **EXACT SKU MATCH**: When user provides a complete SKU, use EXACT match with "eq" on "sku" column
+2. **ATTRIBUTE QUESTIONS**: When asking about product attributes (color, cure time, class, etc.):
+   - Use "ilike" on "searchable_text" column with the product identifier
+   - Set questionType to "specific_ai" to trigger AI extraction
+3. **PARTIAL SEARCH**: Use "ilike" with wildcards on multiple columns including "searchable_text"
+4. **COMPARISON**: When comparing products, use "comparison" questionType
+5. **DEFAULT TO BROAD SEARCH**: When unsure, search "searchable_text" column
+
+INTENT DETECTION:
+- "what is the [attribute] of [product]" → questionType: "specific_ai", search in searchable_text
+- "show details of [SKU]" → questionType: "list", exact SKU match
+- "compare [SKU1] and [SKU2]" → questionType: "comparison"
+- "show me [partial]" → questionType: "list", broad search
 
 RESPONSE FORMAT (JSON):
 {
   "filters": [
     {
       "column": "column_name",
-      "operator": "eq" | "ilike" | "gt" | "lt" | "gte" | "lte",
+      "operator": "eq" | "ilike",
       "value": "value"
     }
   ],
   "searchType": "all" | "any",
-  "questionType": "list" | "specific" | "comparison",
+  "questionType": "list" | "specific_ai" | "comparison",
+  "attributeQuestion": "the original attribute question",
   "compareProducts": ["SKU1", "SKU2"],
-  "extractFields": ["field1", "field2"],
-  "answerTemplate": "The color is {color}",
-  "orderBy": {
-    "column": "column_name",
-    "ascending": true
-  },
   "limit": null | 1
 }
 
-CRITICAL RULES:
-- Use "searchType": "any" (OR logic) for most searches to show more results
-- Use "searchType": "all" (AND logic) only for very specific exact matches
-- Default "limit": null (show all matching results)
-- Only use "limit": 1 for "show details of [exact SKU]" or specific questions
-- When searching partial terms, search across multiple columns (sku, name, description)
-
 EXAMPLES:
 
-Query: "Show me all products"
+Query: "What is the color of PR-1440M Class B"
 Response: {
-  "filters": [], 
-  "searchType": "all", 
-  "questionType": "list",
-  "limit": null
+  "filters": [
+    {"column": "searchable_text", "operator": "ilike", "value": "%PR-1440M%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%Class B%"}
+  ],
+  "searchType": "all",
+  "questionType": "specific_ai",
+  "attributeQuestion": "What is the color?",
+  "limit": 1
+}
+
+Query: "what is the cure time of 0821XXXXXX651SKCS"
+Response: {
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%0821%651SKCS%"}
+  ],
+  "searchType": "any",
+  "questionType": "specific_ai",
+  "attributeQuestion": "What is the cure time?",
+  "limit": 1
 }
 
 Query: "Show the details of 0870A00276012PT"
@@ -252,30 +259,6 @@ Response: {
   "questionType": "comparison",
   "compareProducts": ["0142XCLRCA001BT", "0142XCLRCA001BTBEL"],
   "limit": null
-}
-
-Query: "Show the difference between 0142XCLRCA001BT and 0142XCLRCA001BTBEL"
-Response: {
-  "filters": [
-    {"column": "sku", "operator": "eq", "value": "0142XCLRCA001BT"},
-    {"column": "sku", "operator": "eq", "value": "0142XCLRCA001BTBEL"}
-  ],
-  "searchType": "any",
-  "questionType": "comparison",
-  "compareProducts": ["0142XCLRCA001BT", "0142XCLRCA001BTBEL"],
-  "limit": null
-}
-
-Query: "What is the color of 0890A1/2AM012PTSAL"
-Response: {
-  "filters": [
-    {"column": "sku", "operator": "eq", "value": "0890A1/2AM012PTSAL"}
-  ],
-  "searchType": "all",
-  "questionType": "specific",
-  "extractFields": ["sku", "color", "colour", "name"],
-  "answerTemplate": "The color of {sku} is {color}",
-  "limit": 1
 }`
         },
         {
@@ -297,7 +280,6 @@ Response: {
 
     console.log('📋 Parsed search params:', JSON.stringify(searchParams, null, 2))
 
-    // Ensure proper structure with safe defaults
     if (!searchParams.filters || !Array.isArray(searchParams.filters)) {
       searchParams.filters = []
     }
@@ -311,7 +293,6 @@ Response: {
     // Step 3: Build Supabase query
     let dbQuery: any = supabase.from('products').select('*')
 
-    // Apply filters based on search type
     if (searchParams.filters.length > 0) {
       console.log(`🔍 Applying ${searchParams.filters.length} filters with ${searchParams.searchType} logic`)
       
@@ -359,7 +340,6 @@ Response: {
       console.log('📦 No filters - returning all products')
     }
 
-    // Apply ordering
     if (searchParams.orderBy?.column && columns.includes(searchParams.orderBy.column)) {
       console.log(`📊 Ordering by: ${searchParams.orderBy.column}`)
       dbQuery = dbQuery.order(
@@ -368,7 +348,6 @@ Response: {
       )
     }
 
-    // Apply limit
     const limit = searchParams.limit !== undefined && searchParams.limit !== null 
       ? searchParams.limit 
       : 1000
@@ -378,7 +357,6 @@ Response: {
       console.log(`🔢 Applying limit: ${limit}`)
     }
 
-    // Execute query
     const { data, error } = await dbQuery
 
     if (error) {
@@ -388,7 +366,6 @@ Response: {
 
     console.log(`✅ Query returned ${data?.length || 0} results`)
 
-    // Clean and flatten the results
     const cleanedResults = data?.map((product: ProductRecord) => cleanProductData(product)) || []
 
     // Step 4: Handle comparison questions
@@ -401,32 +378,54 @@ Response: {
       })
     }
 
-    // Step 5: Handle specific questions
-    if (searchParams.questionType === "specific" && cleanedResults.length > 0) {
+    // Step 5: Handle AI-powered specific questions
+    if (searchParams.questionType === "specific_ai" && cleanedResults.length > 0) {
       const product = cleanedResults[0]
-      const extractFields = searchParams.extractFields || []
-      const answerTemplate = searchParams.answerTemplate || ""
+      const attributeQuestion = searchParams.attributeQuestion || query
       
-      const extractedData: ProductRecord = {}
-      extractFields.forEach((field: string) => {
-        if (product[field] !== undefined && product[field] !== null) {
-          extractedData[field] = product[field]
-        }
+      console.log('🤖 Using AI to extract answer from product data')
+      
+      // Use AI to extract the specific answer from the product data
+      const answerCompletion = await openai.chat.completions.create({
+        model: 'gpt-4o-mini',
+        messages: [
+          {
+            role: 'system',
+            content: `You are a product information assistant. Given a product's data and a question, extract the relevant answer.
+
+RULES:
+- Answer the question directly and concisely
+- If the information is not found, say "Information not available"
+- Extract ALL relevant information related to the question
+- Format lists as bullet points with "•" (not HTML)
+- Remove all HTML tags
+- Convert HTML entities (e.g., &deg; to °)
+- Be specific and complete
+
+PRODUCT DATA:
+${JSON.stringify(product, null, 2)}`
+          },
+          {
+            role: 'user',
+            content: attributeQuestion
+          }
+        ],
+        temperature: 0.1
       })
       
-      let answer = answerTemplate
-      Object.keys(extractedData).forEach(key => {
-        const placeholder = `{${key}}`
-        answer = answer.replace(new RegExp(placeholder, 'g'), extractedData[key])
-      })
+      let answer = answerCompletion.choices[0].message.content || 'Information not available'
       
-      answer = answer.replace(/\{[^}]+\}/g, 'N/A')
+      // Clean up the answer
+      answer = stripHtml(answer)
       
       return NextResponse.json({
         success: true,
         questionType: "specific",
         answer: answer,
-        extractedData: extractedData,
+        extractedData: {
+          sku: product.sku || product.product_name || 'N/A',
+          question: attributeQuestion
+        },
         fullProduct: product
       })
     }
