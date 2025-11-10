@@ -81,13 +81,13 @@ export async function POST(request: NextRequest) {
     console.log('Available columns:', columns)
     console.log('User query:', query)
 
-    // Step 2: Use ChatGPT with better context
+    // Step 2: Use ChatGPT with improved prompting
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
-          content: `You are a smart database search assistant. Analyze user queries and generate appropriate database filters and specify what information to extract.
+          content: `You are a smart database search assistant. Analyze user queries and generate appropriate database filters.
 
 DATABASE SCHEMA:
 Columns: ${columns.join(', ')}
@@ -96,15 +96,19 @@ SAMPLE DATA:
 ${JSON.stringify(samplePreview, null, 2)}
 
 SEARCH RULES:
-1. **EXACT SKU MATCH**: When user says "show details of [SKU]", "find [SKU]", "details of [SKU]", use EXACT match with "eq" operator on the SKU column
-2. **PARTIAL SKU SEARCH**: When user says "show me products with [partial code]", "search for [code]", use "ilike" with wildcards
-3. For text searches in descriptions/names, use "ilike" with wildcards: "%search%"
-4. For numeric comparisons, use: gt, lt, gte, lte
-5. **IMPORTANT**: Detect the user's intent:
-   - "show details of X" = EXACT match, questionType: "list", limit: 1
-   - "what is the color of X" = EXACT match, questionType: "specific"
-   - "show me products with X" = PARTIAL match, questionType: "list", limit: null
-   - "find all X" = PARTIAL match, questionType: "list", limit: null
+1. **EXACT SKU MATCH**: When user provides a complete SKU (e.g., "0870A00276012PT"), use EXACT match with "eq" operator
+2. **PARTIAL SEARCH**: When user says "show me", "find", "search for" with partial terms, use "ilike" with wildcards
+3. **BROAD SEARCH**: When unsure, prefer broader searches with "ilike" and "any" (OR logic)
+4. For text searches, use "ilike" with wildcards: "%search%"
+5. **DEFAULT TO SHOWING RESULTS**: When in doubt, return results rather than being too restrictive
+
+IMPORTANT INTENT DETECTION:
+- "show details of [EXACT_SKU]" → eq operator, limit: 1
+- "what is the [field] of [EXACT_SKU]" → eq operator, questionType: "specific"
+- "show me [partial]" → ilike operator, searchType: "any", limit: null
+- "find [partial]" → ilike operator, searchType: "any", limit: null
+- "products with [term]" → ilike operator, searchType: "any", limit: null
+- "show all" → no filters, limit: null
 
 RESPONSE FORMAT (JSON):
 {
@@ -126,12 +130,12 @@ RESPONSE FORMAT (JSON):
   "limit": null | 1
 }
 
-- "questionType": "list" = show full product cards
-- "questionType": "specific" = answer a specific question with extracted data
-- "extractFields": array of column names to extract for specific questions
-- "answerTemplate": how to format the answer (use {fieldname} placeholders)
-- "limit": null for all results, 1 for single product details or specific questions
-- **USE "eq" operator for exact SKU matches, "ilike" for partial searches**
+CRITICAL RULES:
+- Use "searchType": "any" (OR logic) for most searches to show more results
+- Use "searchType": "all" (AND logic) only for very specific exact matches
+- Default "limit": null (show all matching results)
+- Only use "limit": 1 for "show details of [exact SKU]" or specific questions
+- When searching partial terms, search across multiple columns (sku, name, description)
 
 EXAMPLES:
 
@@ -153,21 +157,24 @@ Response: {
   "limit": 1
 }
 
-Query: "Find product 0890A1/2AM012PTSAL"
-Response: {
-  "filters": [
-    {"column": "sku", "operator": "eq", "value": "0890A1/2AM012PTSAL"}
-  ],
-  "searchType": "all",
-  "questionType": "list",
-  "limit": 1
-}
-
-Query: "Show me PS 870 products"
+Query: "Show me PS 870"
 Response: {
   "filters": [
     {"column": "sku", "operator": "ilike", "value": "%PS 870%"},
-    {"column": "sku", "operator": "ilike", "value": "%PS870%"}
+    {"column": "sku", "operator": "ilike", "value": "%PS870%"},
+    {"column": "name", "operator": "ilike", "value": "%PS 870%"},
+    {"column": "name", "operator": "ilike", "value": "%PS870%"}
+  ],
+  "searchType": "any",
+  "questionType": "list",
+  "limit": null
+}
+
+Query: "Find 870"
+Response: {
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%870%"},
+    {"column": "name", "operator": "ilike", "value": "%870%"}
   ],
   "searchType": "any",
   "questionType": "list",
@@ -186,22 +193,13 @@ Response: {
   "limit": 1
 }
 
-Query: "What is the price of PS 870"
+Query: "Products containing blue"
 Response: {
   "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%PS 870%"}
-  ],
-  "searchType": "any",
-  "questionType": "specific",
-  "extractFields": ["sku", "price", "name"],
-  "answerTemplate": "The price of {sku} is {price}",
-  "limit": 1
-}
-
-Query: "Products containing 870"
-Response: {
-  "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%870%"}
+    {"column": "name", "operator": "ilike", "value": "%blue%"},
+    {"column": "description", "operator": "ilike", "value": "%blue%"},
+    {"column": "color", "operator": "ilike", "value": "%blue%"},
+    {"column": "colour", "operator": "ilike", "value": "%blue%"}
   ],
   "searchType": "any",
   "questionType": "list",
@@ -214,7 +212,7 @@ Response: {
         }
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.3
+      temperature: 0.2 // Lower temperature for more consistent results
     })
 
     let searchParams
@@ -225,25 +223,25 @@ Response: {
       searchParams = { filters: [], searchType: "all", questionType: "list", limit: null }
     }
 
-    console.log('Parsed search params:', JSON.stringify(searchParams, null, 2))
+    console.log('📋 Parsed search params:', JSON.stringify(searchParams, null, 2))
 
-    // Ensure proper structure
+    // Ensure proper structure with safe defaults
     if (!searchParams.filters || !Array.isArray(searchParams.filters)) {
       searchParams.filters = []
     }
     if (!searchParams.searchType) {
-      searchParams.searchType = "all"
+      searchParams.searchType = "any" // Default to OR logic for broader results
     }
     if (!searchParams.questionType) {
       searchParams.questionType = "list"
     }
 
-    // Step 3: Build Supabase query with type assertion to avoid deep instantiation
+    // Step 3: Build Supabase query
     let dbQuery: any = supabase.from('products').select('*')
 
     // Apply filters based on search type
     if (searchParams.filters.length > 0) {
-      console.log(`Applying ${searchParams.filters.length} filters with ${searchParams.searchType} logic`)
+      console.log(`🔍 Applying ${searchParams.filters.length} filters with ${searchParams.searchType} logic`)
       
       if (searchParams.searchType === "any") {
         // OR logic - use Supabase's .or() method
@@ -251,7 +249,7 @@ Response: {
         
         if (orConditionString) {
           dbQuery = dbQuery.or(orConditionString)
-          console.log('OR conditions:', orConditionString)
+          console.log('✅ OR conditions:', orConditionString)
         }
       } else {
         // AND logic - apply filters sequentially
@@ -259,9 +257,11 @@ Response: {
           columns.includes(filter.column)
         )
         
+        console.log(`✅ Valid filters: ${validFilters.length}/${searchParams.filters.length}`)
+        
         for (const filter of validFilters) {
           const { column, operator, value } = filter
-          console.log(`Applying filter: ${column} ${operator} ${value}`)
+          console.log(`  → ${column} ${operator} ${value}`)
           
           switch (operator) {
             case 'eq':
@@ -286,32 +286,37 @@ Response: {
         }
       }
     } else {
-      console.log('No filters - returning all products')
+      console.log('📦 No filters - returning all products')
     }
 
     // Apply ordering
     if (searchParams.orderBy?.column && columns.includes(searchParams.orderBy.column)) {
-      console.log(`Ordering by: ${searchParams.orderBy.column}`)
+      console.log(`📊 Ordering by: ${searchParams.orderBy.column}`)
       dbQuery = dbQuery.order(
         searchParams.orderBy.column,
         { ascending: searchParams.orderBy.ascending ?? true }
       )
     }
 
-    // Apply limit - default to 10000 (effectively all) for list queries, or use specified limit
-    const limit = searchParams.limit || (searchParams.questionType === "specific" ? 1 : 10000)
-    dbQuery = dbQuery.limit(limit)
-    console.log(`Applying limit: ${limit}`)
+    // Apply limit - be more permissive with defaults
+    const limit = searchParams.limit !== undefined && searchParams.limit !== null 
+      ? searchParams.limit 
+      : 1000 // Default to 1000 for list queries
+    
+    if (limit > 0) {
+      dbQuery = dbQuery.limit(limit)
+      console.log(`🔢 Applying limit: ${limit}`)
+    }
 
     // Execute query
     const { data, error } = await dbQuery
 
     if (error) {
-      console.error('Supabase error:', error)
+      console.error('❌ Supabase error:', error)
       throw new Error(`Database error: ${error.message}`)
     }
 
-    console.log(`Query returned ${data?.length || 0} results`)
+    console.log(`✅ Query returned ${data?.length || 0} results`)
 
     // Step 4: Handle specific questions
     if (searchParams.questionType === "specific" && data && data.length > 0) {
@@ -355,7 +360,7 @@ Response: {
     })
 
   } catch (error: any) {
-    console.error('Smart search error:', error)
+    console.error('❌ Smart search error:', error)
     return NextResponse.json(
       { 
         error: error.message || 'Internal server error',
