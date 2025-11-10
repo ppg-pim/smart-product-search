@@ -7,12 +7,14 @@ export default function Home() {
   const [results, setResults] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [specificAnswer, setSpecificAnswer] = useState<any>(null)
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
     setError('')
     setResults([])
+    setSpecificAnswer(null)
 
     try {
       const response = await fetch('/api/smart-search', {
@@ -29,7 +31,17 @@ export default function Home() {
         throw new Error(data.error || 'Search failed')
       }
 
-      setResults(data.results || [])
+      // Handle specific question responses
+      if (data.questionType === 'specific') {
+        setSpecificAnswer(data)
+        // Also show the full product in results
+        if (data.fullProduct) {
+          setResults([data.fullProduct])
+        }
+      } else {
+        // Handle list responses
+        setResults(data.results || [])
+      }
     } catch (err: any) {
       setError(err.message)
     } finally {
@@ -102,7 +114,7 @@ export default function Home() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ask anything... (e.g., 'Show me PS 870' or 'Find products with blue color')"
+              placeholder="Ask anything... (e.g., 'Show me PS 870' or 'What is the color of 0890A1/2AM012PTSAL?')"
               className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
             />
             <button
@@ -123,11 +135,42 @@ export default function Home() {
         </div>
       )}
 
+      {/* Specific Answer Display */}
+      {specificAnswer && (
+        <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <svg className="h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div className="ml-3 flex-1">
+              <h3 className="text-lg font-semibold text-blue-900 mb-2">Answer</h3>
+              <p className="text-blue-800 text-lg">{specificAnswer.answer}</p>
+              
+              {specificAnswer.extractedData && Object.keys(specificAnswer.extractedData).length > 0 && (
+                <div className="mt-4 bg-white rounded-lg p-4 border border-blue-200">
+                  <h4 className="font-semibold text-sm text-blue-900 mb-2">Extracted Information:</h4>
+                  <div className="space-y-1">
+                    {Object.entries(specificAnswer.extractedData).map(([key, value]) => (
+                      <div key={key} className="text-sm">
+                        <span className="font-medium text-gray-700">{formatFieldName(key)}:</span>{' '}
+                        <span className="text-gray-900">{String(value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {results.length > 0 && (
         <div>
           <div className="mb-6 flex items-center justify-between">
             <h2 className="text-2xl font-semibold" style={{ color: '#0078a9' }}>
-              Found {results.length} {results.length === 1 ? 'result' : 'results'}
+              {specificAnswer ? 'Full Product Details' : `Found ${results.length} ${results.length === 1 ? 'result' : 'results'}`}
             </h2>
           </div>
 
@@ -226,7 +269,7 @@ export default function Home() {
         </div>
       )}
 
-      {!loading && results.length === 0 && query && !error && (
+      {!loading && results.length === 0 && query && !error && !specificAnswer && (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <p className="text-gray-500 text-lg">No results found for "{query}"</p>
           <p className="text-gray-400 text-sm mt-2">Try a different search term</p>
