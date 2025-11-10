@@ -90,6 +90,37 @@ function cleanProductData(product: ProductRecord): ProductRecord {
   return cleaned
 }
 
+// Helper to truncate product data for AI processing (avoid token limits)
+function truncateProductForAI(product: ProductRecord, maxLength: number = 8000): string {
+  let result = JSON.stringify(product, null, 2)
+  
+  if (result.length > maxLength) {
+    // Prioritize important fields
+    const priorityFields = ['sku', 'product_name', 'name', 'description', 'color', 'colour']
+    const truncated: ProductRecord = {}
+    
+    priorityFields.forEach(field => {
+      if (product[field]) {
+        truncated[field] = product[field]
+      }
+    })
+    
+    // Add other fields until we reach the limit
+    Object.keys(product).forEach(key => {
+      if (!priorityFields.includes(key)) {
+        const testResult = JSON.stringify({ ...truncated, [key]: product[key] })
+        if (testResult.length < maxLength) {
+          truncated[key] = product[key]
+        }
+      }
+    })
+    
+    result = JSON.stringify(truncated, null, 2)
+  }
+  
+  return result
+}
+
 // Helper function to build query string for OR conditions
 function buildOrConditions(filters: any[], columns: string[]): string | null {
   const orConditions = filters
@@ -134,6 +165,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    console.log('🔍 User query:', query)
+
     // Step 1: Get table schema with sample data
     const { data: sampleData, error: schemaError } = await supabase
       .from('products')
@@ -161,42 +194,48 @@ export async function POST(request: NextRequest) {
       return preview
     })
 
-    console.log('Available columns:', columns)
-    console.log('User query:', query)
+    console.log('📊 Available columns:', columns.length)
 
-    // Step 2: Use ChatGPT to understand the query
+    // Step 2: Use GPT-4o-mini to understand the query
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
-          content: `You are a smart database search assistant. Analyze user queries and generate appropriate database filters.
+          content: `You are a smart database search assistant for aerospace products. Analyze user queries and generate appropriate database filters.
 
 DATABASE SCHEMA:
 Columns: ${columns.join(', ')}
 
-SAMPLE DATA:
+SAMPLE DATA STRUCTURE:
 ${JSON.stringify(samplePreview, null, 2)}
 
 IMPORTANT NOTES:
 - The "searchable_text" column contains ALL product information (flattened from all_attributes)
-- When searching for product attributes, ALWAYS include "searchable_text" in filters
-- For specific questions about attributes (color, cure time, etc.), search in "searchable_text"
+- Product identifiers can be in "sku", "product_name", or "name" columns
+- Use BROAD searches with "ilike" and wildcards for maximum accuracy
+- ALWAYS search "searchable_text" column for product attributes
 
-SEARCH RULES:
-1. **EXACT SKU MATCH**: When user provides a complete SKU, use EXACT match with "eq" on "sku" column
-2. **ATTRIBUTE QUESTIONS**: When asking about product attributes (color, cure time, class, etc.):
-   - Use "ilike" on "searchable_text" column with the product identifier
-   - Set questionType to "specific_ai" to trigger AI extraction
-3. **PARTIAL SEARCH**: Use "ilike" with wildcards on multiple columns including "searchable_text"
-4. **COMPARISON**: When comparing products, use "comparison" questionType
-5. **DEFAULT TO BROAD SEARCH**: When unsure, search "searchable_text" column
+SEARCH STRATEGY FOR HIGH ACCURACY:
+1. **COMPARISON QUERIES** ("difference", "compare", "vs", "versus"):
+   - Set questionType: "comparison"
+   - Extract product identifiers (SKU, name, or partial match)
+   - Search in: sku, product_name, name, searchable_text
+   - Use "any" searchType (OR logic) to find all matches
 
-INTENT DETECTION:
-- "what is the [attribute] of [product]" → questionType: "specific_ai", search in searchable_text
-- "show details of [SKU]" → questionType: "list", exact SKU match
-- "compare [SKU1] and [SKU2]" → questionType: "comparison"
-- "show me [partial]" → questionType: "list", broad search
+2. **ATTRIBUTE QUESTIONS** ("what is the [attribute] of [product]"):
+   - Set questionType: "specific_ai"
+   - Search broadly in searchable_text for product identifier
+   - Let AI extract the specific attribute from results
+
+3. **EXACT SKU LOOKUP**:
+   - Use "eq" operator only if SKU format is exact (e.g., "0870A00276012PT")
+   - Otherwise use "ilike" with wildcards
+
+4. **PARTIAL/FUZZY SEARCH**:
+   - Always use "ilike" with "%term%" wildcards
+   - Search multiple columns: sku, product_name, name, searchable_text
+   - Use "any" searchType for broader results
 
 RESPONSE FORMAT (JSON):
 {
@@ -209,12 +248,28 @@ RESPONSE FORMAT (JSON):
   ],
   "searchType": "all" | "any",
   "questionType": "list" | "specific_ai" | "comparison",
-  "attributeQuestion": "the original attribute question",
-  "compareProducts": ["SKU1", "SKU2"],
-  "limit": null | 1
+  "attributeQuestion": "extracted question",
+  "compareProducts": ["product1", "product2"],
+  "limit": null | number
 }
 
 EXAMPLES:
+
+Query: "what is the different PR-148 and PR-187"
+Response: {
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%PR-148%"},
+    {"column": "product_name", "operator": "ilike", "value": "%PR-148%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%PR-148%"},
+    {"column": "sku", "operator": "ilike", "value": "%PR-187%"},
+    {"column": "product_name", "operator": "ilike", "value": "%PR-187%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%PR-187%"}
+  ],
+  "searchType": "any",
+  "questionType": "comparison",
+  "compareProducts": ["PR-148", "PR-187"],
+  "limit": null
+}
 
 Query: "What is the color of PR-1440M Class B"
 Response: {
@@ -225,28 +280,19 @@ Response: {
   "searchType": "all",
   "questionType": "specific_ai",
   "attributeQuestion": "What is the color?",
-  "limit": 1
+  "limit": 5
 }
 
 Query: "what is the cure time of 0821XXXXXX651SKCS"
 Response: {
   "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%0821%651SKCS%"}
+    {"column": "sku", "operator": "ilike", "value": "%0821%651SKCS%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%0821%651SKCS%"}
   ],
   "searchType": "any",
   "questionType": "specific_ai",
   "attributeQuestion": "What is the cure time?",
-  "limit": 1
-}
-
-Query: "Show the details of 0870A00276012PT"
-Response: {
-  "filters": [
-    {"column": "sku", "operator": "eq", "value": "0870A00276012PT"}
-  ],
-  "searchType": "all",
-  "questionType": "list",
-  "limit": 1
+  "limit": 5
 }
 
 Query: "Compare 0142XCLRCA001BT and 0142XCLRCA001BTBEL"
@@ -259,7 +305,13 @@ Response: {
   "questionType": "comparison",
   "compareProducts": ["0142XCLRCA001BT", "0142XCLRCA001BTBEL"],
   "limit": null
-}`
+}
+
+CRITICAL RULES:
+- For comparisons, ALWAYS use "any" searchType to find all products
+- Search multiple columns (sku, product_name, name, searchable_text) for better matches
+- Use "ilike" with wildcards for partial matches
+- Set reasonable limits (5-10) for specific_ai, null for comparisons and lists`
         },
         {
           role: 'user',
@@ -267,15 +319,15 @@ Response: {
         }
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.2
+      temperature: 0.1
     })
 
     let searchParams
     try {
-      searchParams = JSON.parse(completion.choices[0].message.content || '{"filters": [], "searchType": "all", "questionType": "list", "limit": null}')
+      searchParams = JSON.parse(completion.choices[0].message.content || '{"filters": [], "searchType": "any", "questionType": "list", "limit": null}')
     } catch (parseError) {
-      console.error('Failed to parse GPT response:', completion.choices[0].message.content)
-      searchParams = { filters: [], searchType: "all", questionType: "list", limit: null }
+      console.error('❌ Failed to parse GPT response:', completion.choices[0].message.content)
+      searchParams = { filters: [], searchType: "any", questionType: "list", limit: null }
     }
 
     console.log('📋 Parsed search params:', JSON.stringify(searchParams, null, 2))
@@ -301,7 +353,7 @@ Response: {
         
         if (orConditionString) {
           dbQuery = dbQuery.or(orConditionString)
-          console.log('✅ OR conditions:', orConditionString)
+          console.log('✅ OR conditions applied')
         }
       } else {
         const validFilters = searchParams.filters.filter((filter: any) => 
@@ -348,6 +400,7 @@ Response: {
       )
     }
 
+    // Apply limit - default to 1000 for comprehensive search
     const limit = searchParams.limit !== undefined && searchParams.limit !== null 
       ? searchParams.limit 
       : 1000
@@ -366,16 +419,59 @@ Response: {
 
     console.log(`✅ Query returned ${data?.length || 0} results`)
 
-    const cleanedResults = data?.map((product: ProductRecord) => cleanProductData(product)) || []
-
-    // Step 4: Handle comparison questions
-    if (searchParams.questionType === "comparison" && cleanedResults.length >= 2) {
+    if (!data || data.length === 0) {
       return NextResponse.json({
         success: true,
-        questionType: "comparison",
-        products: cleanedResults,
-        compareProducts: searchParams.compareProducts || []
+        questionType: "list",
+        results: [],
+        count: 0,
+        message: "No products found matching your query"
       })
+    }
+
+    const cleanedResults = data.map((product: ProductRecord) => cleanProductData(product))
+
+    // Step 4: Handle comparison questions
+    if (searchParams.questionType === "comparison") {
+      console.log(`🔄 Comparison mode - found ${cleanedResults.length} products`)
+      
+      if (cleanedResults.length >= 2) {
+        // Group products by similarity to comparison terms
+        const compareProducts = searchParams.compareProducts || []
+        const groupedProducts: ProductRecord[] = []
+        
+        compareProducts.forEach(term => {
+          const matchedProduct = cleanedResults.find((p: ProductRecord) => 
+            (p.sku && p.sku.toLowerCase().includes(term.toLowerCase())) ||
+            (p.product_name && p.product_name.toLowerCase().includes(term.toLowerCase())) ||
+            (p.name && p.name.toLowerCase().includes(term.toLowerCase()))
+          )
+          if (matchedProduct && !groupedProducts.includes(matchedProduct)) {
+            groupedProducts.push(matchedProduct)
+          }
+        })
+        
+        // If we found matches for comparison terms, use those; otherwise use first 2 results
+        const productsToCompare = groupedProducts.length >= 2 
+          ? groupedProducts.slice(0, 2) 
+          : cleanedResults.slice(0, 2)
+        
+        return NextResponse.json({
+          success: true,
+          questionType: "comparison",
+          products: productsToCompare,
+          compareProducts: searchParams.compareProducts || [],
+          totalFound: cleanedResults.length
+        })
+      } else {
+        return NextResponse.json({
+          success: true,
+          questionType: "list",
+          results: cleanedResults,
+          count: cleanedResults.length,
+          message: "Found only one product. Need at least 2 products for comparison."
+        })
+      }
     }
 
     // Step 5: Handle AI-powered specific questions
@@ -385,49 +481,62 @@ Response: {
       
       console.log('🤖 Using AI to extract answer from product data')
       
-      // Use AI to extract the specific answer from the product data
-      const answerCompletion = await openai.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: `You are a product information assistant. Given a product's data and a question, extract the relevant answer.
+      try {
+        // Truncate product data to avoid token limits
+        const productDataString = truncateProductForAI(product, 8000)
+        
+        const answerCompletion = await openai.chat.completions.create({
+          model: 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: `You are a product information assistant. Extract the relevant answer from the product data.
 
 RULES:
-- Answer the question directly and concisely
-- If the information is not found, say "Information not available"
-- Extract ALL relevant information related to the question
-- Format lists as bullet points with "•" (not HTML)
+- Answer directly and concisely
+- If information not found, say "Information not available in product data"
+- Extract ALL relevant information
+- Format lists with bullet points using "•"
 - Remove all HTML tags
 - Convert HTML entities (e.g., &deg; to °)
 - Be specific and complete
 
 PRODUCT DATA:
-${JSON.stringify(product, null, 2)}`
+${productDataString}`
+            },
+            {
+              role: 'user',
+              content: attributeQuestion
+            }
+          ],
+          temperature: 0.1,
+          max_tokens: 1000
+        })
+        
+        let answer = answerCompletion.choices[0].message.content || 'Information not available'
+        answer = stripHtml(answer)
+        
+        return NextResponse.json({
+          success: true,
+          questionType: "specific",
+          answer: answer,
+          extractedData: {
+            sku: product.sku || product.product_name || product.name || 'N/A',
+            question: attributeQuestion
           },
-          {
-            role: 'user',
-            content: attributeQuestion
-          }
-        ],
-        temperature: 0.1
-      })
-      
-      let answer = answerCompletion.choices[0].message.content || 'Information not available'
-      
-      // Clean up the answer
-      answer = stripHtml(answer)
-      
-      return NextResponse.json({
-        success: true,
-        questionType: "specific",
-        answer: answer,
-        extractedData: {
-          sku: product.sku || product.product_name || 'N/A',
-          question: attributeQuestion
-        },
-        fullProduct: product
-      })
+          fullProduct: product
+        })
+      } catch (aiError: any) {
+        console.error('❌ AI extraction error:', aiError.message)
+        // Fallback: return the product data
+        return NextResponse.json({
+          success: true,
+          questionType: "list",
+          results: cleanedResults.slice(0, 1),
+          count: 1,
+          message: "Found product but couldn't extract specific answer. Showing full details."
+        })
+      }
     }
 
     // Default: return cleaned results
@@ -440,12 +549,16 @@ ${JSON.stringify(product, null, 2)}`
 
   } catch (error: any) {
     console.error('❌ Smart search error:', error)
+    
+    // Return detailed error for debugging
     return NextResponse.json(
       { 
+        success: false,
         error: error.message || 'Internal server error',
-        details: error.toString()
+        details: process.env.NODE_ENV === 'development' ? error.toString() : undefined
       },
       { status: 500 }
     )
   }
 }
+
