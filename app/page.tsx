@@ -47,6 +47,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [searchHistory, setSearchHistory] = useState<string[]>([])
+  const [viewMode, setViewMode] = useState<'cards' | 'comparison'>('cards')
 
   // Load search history from localStorage on mount
   useEffect(() => {
@@ -86,6 +87,7 @@ export default function Home() {
     setResults([])
     setSpecificAnswer(null)
     setExtractedData(null)
+    setViewMode('cards') // Reset to cards view
 
     // Add to search history
     addToHistory(query)
@@ -142,6 +144,22 @@ export default function Home() {
     if (lowerQuery.includes('all')) return '📦'
     if (lowerQuery.includes('what') || lowerQuery.includes('?')) return '❓'
     return '🔍'
+  }
+
+  // Determine grid layout based on result count
+  const getGridClass = () => {
+    if (results.length === 1) return 'grid-cols-1' // Full width
+    if (results.length === 2) return 'grid-cols-1 md:grid-cols-2' // Side by side
+    return 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3' // Default 3 columns
+  }
+
+  // Get all unique keys from results for comparison
+  const getAllKeys = () => {
+    const keysSet = new Set<string>()
+    results.slice(0, 5).forEach(product => {
+      Object.keys(product).forEach(key => keysSet.add(key))
+    })
+    return Array.from(keysSet)
   }
 
   return (
@@ -283,39 +301,134 @@ export default function Home() {
             <h2 className="text-2xl font-semibold text-gray-800">
               ✅ Found {results.length} {results.length === 1 ? 'result' : 'results'}
             </h2>
+            
+            {/* View Toggle - Only show if 2-5 results */}
+            {results.length >= 2 && results.length <= 5 && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setViewMode('cards')}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    viewMode === 'cards'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  📋 Cards
+                </button>
+                <button
+                  onClick={() => setViewMode('comparison')}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    viewMode === 'comparison'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+                  }`}
+                >
+                  ⚖️ Compare
+                </button>
+              </div>
+            )}
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {results.map((product, index) => (
-              <div
-                key={index}
-                className="p-6 bg-white border-2 border-gray-200 rounded-xl hover:shadow-xl hover:border-blue-300 transition-all duration-200"
-              >
-                {Object.entries(product).map(([key, value]) => {
-                  // Skip null or undefined values
-                  if (value === null || value === undefined) return null
-                  
-                  const stringValue = String(value)
-                  const cleanValue = decodeHtml(stringValue)
-                  const displayValue = truncateText(cleanValue, 200)
-                  
-                  // Highlight important fields
-                  const isImportant = ['sku', 'name', 'title', 'price', 'id'].includes(key.toLowerCase())
-                  
-                  return (
-                    <div key={key} className="mb-3 pb-3 border-b border-gray-100 last:border-0">
-                      <div className={`font-semibold capitalize mb-1 ${isImportant ? 'text-blue-700 text-lg' : 'text-gray-700 text-sm'}`}>
-                        {key.replace(/_/g, ' ')}
+          {/* Cards View */}
+          {viewMode === 'cards' && (
+            <div className={`grid ${getGridClass()} gap-6`}>
+              {results.map((product, index) => (
+                <div
+                  key={index}
+                  className="p-6 bg-white border-2 border-gray-200 rounded-xl hover:shadow-xl hover:border-blue-300 transition-all duration-200"
+                >
+                  {Object.entries(product).map(([key, value]) => {
+                    // Skip null or undefined values
+                    if (value === null || value === undefined) return null
+                    
+                    const stringValue = String(value)
+                    const cleanValue = decodeHtml(stringValue)
+                    const displayValue = results.length === 1 
+                      ? cleanValue // Don't truncate for single result
+                      : truncateText(cleanValue, 200)
+                    
+                    // Highlight important fields
+                    const isImportant = ['sku', 'name', 'title', 'price', 'id'].includes(key.toLowerCase())
+                    
+                    return (
+                      <div key={key} className="mb-3 pb-3 border-b border-gray-100 last:border-0">
+                        <div className={`font-semibold capitalize mb-1 ${isImportant ? 'text-blue-700 text-lg' : 'text-gray-700 text-sm'}`}>
+                          {key.replace(/_/g, ' ')}
+                        </div>
+                        <div className="text-gray-600 break-words whitespace-pre-wrap">
+                          {displayValue || 'N/A'}
+                        </div>
                       </div>
-                      <div className="text-gray-600 break-words whitespace-pre-wrap">
-                        {displayValue || 'N/A'}
-                      </div>
-                    </div>
-                  )
-                })}
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Comparison View */}
+          {viewMode === 'comparison' && results.length >= 2 && results.length <= 5 && (
+            <div className="bg-white rounded-xl shadow-lg overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead className="bg-gradient-to-r from-blue-500 to-indigo-600 text-white">
+                    <tr>
+                      <th className="px-4 py-3 text-left font-semibold sticky left-0 bg-blue-600 z-10">
+                        Field
+                      </th>
+                      {results.slice(0, 5).map((product, index) => (
+                        <th key={index} className="px-4 py-3 text-left font-semibold min-w-[250px]">
+                          Product {index + 1}
+                          {product.sku && (
+                            <div className="text-xs font-normal opacity-90 mt-1">
+                              {truncateText(String(product.sku), 30)}
+                            </div>
+                          )}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {getAllKeys().map((key, keyIndex) => {
+                      // Highlight important fields
+                      const isImportant = ['sku', 'name', 'title', 'price', 'id'].includes(key.toLowerCase())
+                      
+                      return (
+                        <tr 
+                          key={key} 
+                          className={`border-b border-gray-200 ${keyIndex % 2 === 0 ? 'bg-gray-50' : 'bg-white'} hover:bg-blue-50 transition-colors`}
+                        >
+                          <td className={`px-4 py-3 font-semibold capitalize sticky left-0 z-10 ${keyIndex % 2 === 0 ? 'bg-gray-50' : 'bg-white'} ${isImportant ? 'text-blue-700' : 'text-gray-700'}`}>
+                            {key.replace(/_/g, ' ')}
+                          </td>
+                          {results.slice(0, 5).map((product, productIndex) => {
+                            const value = product[key]
+                            if (value === null || value === undefined) {
+                              return (
+                                <td key={productIndex} className="px-4 py-3 text-gray-400 italic">
+                                  N/A
+                                </td>
+                              )
+                            }
+                            
+                            const stringValue = String(value)
+                            const cleanValue = decodeHtml(stringValue)
+                            const displayValue = truncateText(cleanValue, 150)
+                            
+                            return (
+                              <td key={productIndex} className="px-4 py-3 text-gray-700 break-words">
+                                {displayValue}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
-            ))}
-          </div>
+            </div>
+          )}
         </div>
       )}
 
