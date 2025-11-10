@@ -215,13 +215,16 @@ IMPORTANT NOTES:
 - Product identifiers can be in "sku", "product_name", or "name" columns
 - Use BROAD searches with "ilike" and wildcards for maximum accuracy
 - ALWAYS search "searchable_text" column for product attributes
+- Product names may appear with or without spaces/dashes (e.g., "PS870", "PS-870", "PS 870")
 
 SEARCH STRATEGY FOR HIGH ACCURACY:
-1. **COMPARISON QUERIES** ("difference", "compare", "vs", "versus"):
+1. **COMPARISON QUERIES** ("difference", "compare", "vs", "versus", "between"):
    - Set questionType: "comparison"
    - Extract product identifiers (SKU, name, or partial match)
+   - Create MULTIPLE filter variations for each product (with/without spaces, dashes)
    - Search in: sku, product_name, name, searchable_text
    - Use "any" searchType (OR logic) to find all matches
+   - CRITICAL: Create filters for EACH product separately with wildcards
 
 2. **ATTRIBUTE QUESTIONS** ("what is the [attribute] of [product]"):
    - Set questionType: "specific_ai"
@@ -255,14 +258,38 @@ RESPONSE FORMAT (JSON):
 
 EXAMPLES:
 
+Query: "what is the difference between ps 870 and ps 890"
+Response: {
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%PS%870%"},
+    {"column": "product_name", "operator": "ilike", "value": "%PS%870%"},
+    {"column": "name", "operator": "ilike", "value": "%PS%870%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%PS%870%"},
+    {"column": "sku", "operator": "ilike", "value": "%PS%890%"},
+    {"column": "product_name", "operator": "ilike", "value": "%PS%890%"},
+    {"column": "name", "operator": "ilike", "value": "%PS%890%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%PS%890%"}
+  ],
+  "searchType": "any",
+  "questionType": "comparison",
+  "compareProducts": ["PS 870", "PS 890"],
+  "limit": null
+}
+
 Query: "what is the different PR-148 and PR-187"
 Response: {
   "filters": [
     {"column": "sku", "operator": "ilike", "value": "%PR-148%"},
+    {"column": "sku", "operator": "ilike", "value": "%PR148%"},
     {"column": "product_name", "operator": "ilike", "value": "%PR-148%"},
+    {"column": "product_name", "operator": "ilike", "value": "%PR148%"},
+    {"column": "name", "operator": "ilike", "value": "%PR-148%"},
     {"column": "searchable_text", "operator": "ilike", "value": "%PR-148%"},
     {"column": "sku", "operator": "ilike", "value": "%PR-187%"},
+    {"column": "sku", "operator": "ilike", "value": "%PR187%"},
     {"column": "product_name", "operator": "ilike", "value": "%PR-187%"},
+    {"column": "product_name", "operator": "ilike", "value": "%PR187%"},
+    {"column": "name", "operator": "ilike", "value": "%PR-187%"},
     {"column": "searchable_text", "operator": "ilike", "value": "%PR-187%"}
   ],
   "searchType": "any",
@@ -307,11 +334,14 @@ Response: {
   "limit": null
 }
 
-CRITICAL RULES:
-- For comparisons, ALWAYS use "any" searchType to find all products
-- Search multiple columns (sku, product_name, name, searchable_text) for better matches
-- Use "ilike" with wildcards for partial matches
-- Set reasonable limits (5-10) for specific_ai, null for comparisons and lists`
+CRITICAL RULES FOR COMPARISONS:
+- For "difference between X and Y", create separate filters for EACH product
+- Use wildcards: %PS%870% will match "PS870", "PS-870", "PS 870", "APS870B"
+- Search ALL relevant columns (sku, product_name, name, searchable_text) for EACH product
+- ALWAYS use "any" searchType for comparisons
+- Set limit to null for comparisons to get all matches
+- Extract both product identifiers for compareProducts array
+- Create variations with/without spaces and dashes for better matching`
         },
         {
           role: 'user',
@@ -353,7 +383,7 @@ CRITICAL RULES:
         
         if (orConditionString) {
           dbQuery = dbQuery.or(orConditionString)
-          console.log('✅ OR conditions applied')
+          console.log('✅ OR conditions applied:', orConditionString)
         }
       } else {
         const validFilters = searchParams.filters.filter((filter: any) => 
@@ -410,7 +440,7 @@ CRITICAL RULES:
       console.log(`🔢 Applying limit: ${limit}`)
     }
 
-    const { data, error } = await dbQuery
+    let { data, error } = await dbQuery
 
     if (error) {
       console.error('❌ Supabase error:', error)
@@ -418,6 +448,34 @@ CRITICAL RULES:
     }
 
     console.log(`✅ Query returned ${data?.length || 0} results`)
+
+    // FALLBACK: If comparison query returned no results, try simpler search
+    if ((!data || data.length === 0) && searchParams.questionType === "comparison" && searchParams.compareProducts?.length > 0) {
+      console.log('🔄 No results found, trying fallback search...')
+      
+      const fallbackFilters: string[] = []
+      searchParams.compareProducts.forEach((product: string) => {
+        // Remove spaces and special characters for broader match
+        const cleanProduct = product.replace(/[\s-]/g, '')
+        fallbackFilters.push(`searchable_text.ilike.%${cleanProduct}%`)
+        fallbackFilters.push(`sku.ilike.%${cleanProduct}%`)
+        fallbackFilters.push(`product_name.ilike.%${cleanProduct}%`)
+        fallbackFilters.push(`name.ilike.%${cleanProduct}%`)
+      })
+      
+      const fallbackQuery = supabase
+        .from('products')
+        .select('*')
+        .or(fallbackFilters.join(','))
+        .limit(1000)
+      
+      const fallbackResult = await fallbackQuery
+      
+      if (!fallbackResult.error && fallbackResult.data && fallbackResult.data.length > 0) {
+        console.log(`✅ Fallback search found ${fallbackResult.data.length} results`)
+        data = fallbackResult.data
+      }
+    }
 
     if (!data || data.length === 0) {
       return NextResponse.json({
@@ -442,9 +500,9 @@ CRITICAL RULES:
         
         compareProducts.forEach((term: string) => {
           const matchedProduct = cleanedResults.find((p: ProductRecord) => 
-            (p.sku && p.sku.toLowerCase().includes(term.toLowerCase())) ||
-            (p.product_name && p.product_name.toLowerCase().includes(term.toLowerCase())) ||
-            (p.name && p.name.toLowerCase().includes(term.toLowerCase()))
+            (p.sku && p.sku.toLowerCase().includes(term.toLowerCase().replace(/[\s-]/g, ''))) ||
+            (p.product_name && p.product_name.toLowerCase().includes(term.toLowerCase().replace(/[\s-]/g, ''))) ||
+            (p.name && p.name.toLowerCase().includes(term.toLowerCase().replace(/[\s-]/g, '')))
           )
           if (matchedProduct && !groupedProducts.includes(matchedProduct)) {
             groupedProducts.push(matchedProduct)
@@ -561,4 +619,3 @@ ${productDataString}`
     )
   }
 }
-
