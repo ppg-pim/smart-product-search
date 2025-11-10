@@ -6,12 +6,15 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
+// Add this type definition
+type ProductRecord = Record<string, any>
+
 // Helper function to strip HTML tags
 function stripHtml(html: string): string {
   if (typeof html !== 'string') return html
   return html
-    .replace(/<[^>]*>/g, '') // Remove HTML tags
-    .replace(/&nbsp;/g, ' ') // Replace &nbsp; with space
+    .replace(/<[^>]*>/g, '')
+    .replace(/&nbsp;/g, ' ')
     .replace(/&amp;/g, '&')
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -21,8 +24,8 @@ function stripHtml(html: string): string {
 }
 
 // Helper function to clean and flatten product data
-function cleanProductData(product: any): any {
-  const cleaned: any = {}
+function cleanProductData(product: ProductRecord): ProductRecord {
+  const cleaned: ProductRecord = {}
   
   // Fields to exclude
   const excludeFields = ['embedding', 'all_attributes']
@@ -50,7 +53,7 @@ function cleanProductData(product: any): any {
   // Parse and merge all_attributes if it exists
   if (product.all_attributes) {
     try {
-      let attributes: any = {}
+      let attributes: ProductRecord = {}
       
       // Handle if all_attributes is a string (JSON string)
       if (typeof product.all_attributes === 'string') {
@@ -143,8 +146,8 @@ export async function POST(request: NextRequest) {
       : []
 
     // Create a sample data preview for GPT to understand the data structure
-    const samplePreview = sampleData?.slice(0, 2).map(item => {
-      const preview: any = {}
+    const samplePreview = sampleData?.slice(0, 2).map((item: ProductRecord) => {
+      const preview: ProductRecord = {}
       Object.keys(item).forEach(key => {
         const value = item[key]
         if (typeof value === 'string' && value.length > 100) {
@@ -394,8 +397,8 @@ Response: {
 
     console.log(`✅ Query returned ${data?.length || 0} results`)
 
-    // Clean and flatten the results
-    const cleanedResults = data?.map(product => cleanProductData(product)) || []
+    // Clean and flatten the results - FIXED LINE
+    const cleanedResults = data?.map((product: ProductRecord) => cleanProductData(product)) || []
 
     // Step 4: Handle specific questions
     if (searchParams.questionType === "specific" && cleanedResults.length > 0) {
@@ -403,7 +406,7 @@ Response: {
       const extractFields = searchParams.extractFields || []
       const answerTemplate = searchParams.answerTemplate || ""
       
-      const extractedData: any = {}
+      const extractedData: ProductRecord = {}
       extractFields.forEach((field: string) => {
         if (product[field] !== undefined && product[field] !== null) {
           extractedData[field] = product[field]
