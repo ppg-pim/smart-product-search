@@ -39,6 +39,27 @@ function buildOrConditions(filters: any[], columns: string[]): string | null {
   return orConditions.length > 0 ? orConditions.join(',') : null
 }
 
+// Helper function to remove unwanted fields and filter out null/empty values
+function cleanProductData(products: any[]): any[] {
+  const fieldsToExclude = ['embedding', 'Embedding', 'EMBEDDING']
+  
+  return products.map(product => {
+    const cleaned: any = {}
+    
+    Object.keys(product).forEach(key => {
+      // Skip embedding fields
+      if (fieldsToExclude.some(field => key.toLowerCase() === field.toLowerCase())) {
+        return
+      }
+      
+      // Include all fields (even if null/empty) to show complete product data
+      cleaned[key] = product[key]
+    })
+    
+    return cleaned
+  })
+}
+
 export async function POST(request: NextRequest) {
   try {
     const { query } = await request.json()
@@ -60,14 +81,22 @@ export async function POST(request: NextRequest) {
       throw new Error(`Schema error: ${schemaError.message}`)
     }
 
-    const columns = sampleData && sampleData.length > 0 
+    const allColumns = sampleData && sampleData.length > 0 
       ? Object.keys(sampleData[0]) 
       : []
+    
+    // Filter out embedding column from searchable columns
+    const columns = allColumns.filter(col => 
+      !['embedding', 'Embedding', 'EMBEDDING'].includes(col)
+    )
 
     // Create a sample data preview for GPT to understand the data structure
     const samplePreview = sampleData?.slice(0, 2).map(item => {
       const preview: any = {}
       Object.keys(item).forEach(key => {
+        if (['embedding', 'Embedding', 'EMBEDDING'].includes(key)) {
+          return // Skip embedding in preview
+        }
         const value = item[key]
         if (typeof value === 'string' && value.length > 100) {
           preview[key] = value.substring(0, 100) + '...'
@@ -78,7 +107,7 @@ export async function POST(request: NextRequest) {
       return preview
     })
 
-    console.log('Available columns:', columns)
+    console.log('Available columns:', columns.length)
     console.log('User query:', query)
 
     // Step 2: Use ChatGPT with improved prompting
@@ -87,7 +116,7 @@ export async function POST(request: NextRequest) {
       messages: [
         {
           role: 'system',
-          content: `You are a smart database search assistant. Analyze user queries and generate appropriate database filters.
+          content: `You are a smart database search assistant for an aerospace products database. Analyze user queries and generate appropriate database filters.
 
 DATABASE SCHEMA:
 Columns: ${columns.join(', ')}
@@ -101,6 +130,7 @@ SEARCH RULES:
 3. **BROAD SEARCH**: When unsure, prefer broader searches with "ilike" and "any" (OR logic)
 4. For text searches, use "ilike" with wildcards: "%search%"
 5. **DEFAULT TO SHOWING RESULTS**: When in doubt, return results rather than being too restrictive
+6. **ATTRIBUTE SEARCH**: When users ask about specific attributes (Color, Chemistry, Brand, etc.), search in those columns
 
 IMPORTANT INTENT DETECTION:
 - "show details of [EXACT_SKU]" → eq operator, limit: 1
@@ -109,6 +139,8 @@ IMPORTANT INTENT DETECTION:
 - "find [partial]" → ilike operator, searchType: "any", limit: null
 - "products with [term]" → ilike operator, searchType: "any", limit: null
 - "show all" → no filters, limit: null
+- "what colors are available" → search Color column
+- "show me [brand] products" → search Brand column
 
 RESPONSE FORMAT (JSON):
 {
@@ -135,7 +167,7 @@ CRITICAL RULES:
 - Use "searchType": "all" (AND logic) only for very specific exact matches
 - Default "limit": null (show all matching results)
 - Only use "limit": 1 for "show details of [exact SKU]" or specific questions
-- When searching partial terms, search across multiple columns (sku, name, description)
+- When searching partial terms, search across multiple columns (SKU, Product Name, Product Description, Categories)
 
 EXAMPLES:
 
@@ -150,7 +182,7 @@ Response: {
 Query: "Show the details of 0870A00276012PT"
 Response: {
   "filters": [
-    {"column": "sku", "operator": "eq", "value": "0870A00276012PT"}
+    {"column": "SKU", "operator": "eq", "value": "0870A00276012PT"}
   ],
   "searchType": "all",
   "questionType": "list",
@@ -160,10 +192,10 @@ Response: {
 Query: "Show me PS 870"
 Response: {
   "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%PS 870%"},
-    {"column": "sku", "operator": "ilike", "value": "%PS870%"},
-    {"column": "name", "operator": "ilike", "value": "%PS 870%"},
-    {"column": "name", "operator": "ilike", "value": "%PS870%"}
+    {"column": "SKU", "operator": "ilike", "value": "%PS 870%"},
+    {"column": "SKU", "operator": "ilike", "value": "%PS870%"},
+    {"column": "Product Name", "operator": "ilike", "value": "%PS 870%"},
+    {"column": "Product Name", "operator": "ilike", "value": "%PS870%"}
   ],
   "searchType": "any",
   "questionType": "list",
@@ -173,8 +205,8 @@ Response: {
 Query: "Find 870"
 Response: {
   "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%870%"},
-    {"column": "name", "operator": "ilike", "value": "%870%"}
+    {"column": "SKU", "operator": "ilike", "value": "%870%"},
+    {"column": "Product Name", "operator": "ilike", "value": "%870%"}
   ],
   "searchType": "any",
   "questionType": "list",
@@ -184,22 +216,31 @@ Response: {
 Query: "What is the color of 0890A1/2AM012PTSAL"
 Response: {
   "filters": [
-    {"column": "sku", "operator": "eq", "value": "0890A1/2AM012PTSAL"}
+    {"column": "SKU", "operator": "eq", "value": "0890A1/2AM012PTSAL"}
   ],
   "searchType": "all",
   "questionType": "specific",
-  "extractFields": ["sku", "color", "colour", "name"],
-  "answerTemplate": "The color of {sku} is {color}",
+  "extractFields": ["SKU", "Color", "Product Name"],
+  "answerTemplate": "The color of {SKU} is {Color}",
   "limit": 1
 }
 
 Query: "Products containing blue"
 Response: {
   "filters": [
-    {"column": "name", "operator": "ilike", "value": "%blue%"},
-    {"column": "description", "operator": "ilike", "value": "%blue%"},
-    {"column": "color", "operator": "ilike", "value": "%blue%"},
-    {"column": "colour", "operator": "ilike", "value": "%blue%"}
+    {"column": "Product Name", "operator": "ilike", "value": "%blue%"},
+    {"column": "Product Description", "operator": "ilike", "value": "%blue%"},
+    {"column": "Color", "operator": "ilike", "value": "%blue%"}
+  ],
+  "searchType": "any",
+  "questionType": "list",
+  "limit": null
+}
+
+Query: "Show me PPG products"
+Response: {
+  "filters": [
+    {"column": "Brand", "operator": "ilike", "value": "%PPG%"}
   ],
   "searchType": "any",
   "questionType": "list",
@@ -212,7 +253,7 @@ Response: {
         }
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.2 // Lower temperature for more consistent results
+      temperature: 0.2
     })
 
     let searchParams
@@ -230,13 +271,13 @@ Response: {
       searchParams.filters = []
     }
     if (!searchParams.searchType) {
-      searchParams.searchType = "any" // Default to OR logic for broader results
+      searchParams.searchType = "any"
     }
     if (!searchParams.questionType) {
       searchParams.questionType = "list"
     }
 
-    // Step 3: Build Supabase query
+    // Step 3: Build Supabase query - SELECT ALL COLUMNS
     let dbQuery: any = supabase.from('products').select('*')
 
     // Apply filters based on search type
@@ -244,7 +285,6 @@ Response: {
       console.log(`🔍 Applying ${searchParams.filters.length} filters with ${searchParams.searchType} logic`)
       
       if (searchParams.searchType === "any") {
-        // OR logic - use Supabase's .or() method
         const orConditionString = buildOrConditions(searchParams.filters, columns)
         
         if (orConditionString) {
@@ -252,7 +292,6 @@ Response: {
           console.log('✅ OR conditions:', orConditionString)
         }
       } else {
-        // AND logic - apply filters sequentially
         const validFilters = searchParams.filters.filter((filter: any) => 
           columns.includes(filter.column)
         )
@@ -298,10 +337,10 @@ Response: {
       )
     }
 
-    // Apply limit - be more permissive with defaults
+    // Apply limit
     const limit = searchParams.limit !== undefined && searchParams.limit !== null 
       ? searchParams.limit 
-      : 1000 // Default to 1000 for list queries
+      : 1000
     
     if (limit > 0) {
       dbQuery = dbQuery.limit(limit)
@@ -318,13 +357,15 @@ Response: {
 
     console.log(`✅ Query returned ${data?.length || 0} results`)
 
+    // Clean the data - remove embedding field
+    const cleanedData = data ? cleanProductData(data) : []
+
     // Step 4: Handle specific questions
-    if (searchParams.questionType === "specific" && data && data.length > 0) {
-      const product = data[0]
+    if (searchParams.questionType === "specific" && cleanedData && cleanedData.length > 0) {
+      const product = cleanedData[0]
       const extractFields = searchParams.extractFields || []
       const answerTemplate = searchParams.answerTemplate || ""
       
-      // Extract requested fields
       const extractedData: any = {}
       extractFields.forEach((field: string) => {
         if (product[field] !== undefined && product[field] !== null) {
@@ -332,14 +373,12 @@ Response: {
         }
       })
       
-      // Generate answer using template
       let answer = answerTemplate
       Object.keys(extractedData).forEach(key => {
         const placeholder = `{${key}}`
         answer = answer.replace(new RegExp(placeholder, 'g'), extractedData[key])
       })
       
-      // Remove any unfilled placeholders
       answer = answer.replace(/\{[^}]+\}/g, 'N/A')
       
       return NextResponse.json({
@@ -351,12 +390,13 @@ Response: {
       })
     }
 
-    // Default: return full results
+    // Default: return full results with all attributes
     return NextResponse.json({
       success: true,
       questionType: "list",
-      results: data,
-      count: data?.length || 0
+      results: cleanedData,
+      count: cleanedData?.length || 0,
+      totalAttributes: cleanedData.length > 0 ? Object.keys(cleanedData[0]).length : 0
     })
 
   } catch (error: any) {
