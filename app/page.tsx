@@ -8,6 +8,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [specificAnswer, setSpecificAnswer] = useState<any>(null)
+  const [comparisonData, setComparisonData] = useState<any>(null)
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -15,6 +16,7 @@ export default function Home() {
     setError('')
     setResults([])
     setSpecificAnswer(null)
+    setComparisonData(null)
 
     try {
       const response = await fetch('/api/smart-search', {
@@ -31,15 +33,20 @@ export default function Home() {
         throw new Error(data.error || 'Search failed')
       }
 
+      // Handle comparison responses
+      if (data.questionType === 'comparison') {
+        setComparisonData(data)
+        setResults(data.products || [])
+      }
       // Handle specific question responses
-      if (data.questionType === 'specific') {
+      else if (data.questionType === 'specific') {
         setSpecificAnswer(data)
-        // Also show the full product in results
         if (data.fullProduct) {
           setResults([data.fullProduct])
         }
-      } else {
-        // Handle list responses
+      } 
+      // Handle list responses
+      else {
         setResults(data.results || [])
       }
     } catch (err: any) {
@@ -79,7 +86,6 @@ export default function Home() {
 
   // Format field name for display
   const formatFieldName = (key: string): string => {
-    // Handle specific field mappings
     const fieldMappings: { [key: string]: string } = {
       'sku': 'SKU',
       'product_name': 'Product Name',
@@ -92,7 +98,6 @@ export default function Home() {
       return fieldMappings[lowerKey]
     }
     
-    // Default formatting
     return key
       .replace(/_/g, ' ')
       .replace(/\b\w/g, (char) => char.toUpperCase())
@@ -112,6 +117,142 @@ export default function Home() {
     return String(value)
   }
 
+  // Get all unique keys from products for comparison
+  const getAllKeys = (products: any[]) => {
+    const allKeys = new Set<string>()
+    products.forEach(product => {
+      Object.keys(product).forEach(key => allKeys.add(key))
+    })
+    return Array.from(allKeys)
+  }
+
+  // Check if values are different across products
+  const isDifferent = (key: string, products: any[]) => {
+    const values = products.map(p => p[key])
+    return new Set(values).size > 1
+  }
+
+  // Render comparison table
+  const renderComparison = () => {
+    if (!comparisonData || !comparisonData.products || comparisonData.products.length < 2) {
+      return null
+    }
+
+    const products = comparisonData.products
+    const allKeys = getAllKeys(products)
+    
+    // Categorize fields
+    const priorityFields = ['sku', 'product_name', 'productname', 'name']
+    const excludeFields = ['created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext']
+    
+    const priority = allKeys.filter(k => priorityFields.includes(k.toLowerCase()))
+    const technical = allKeys.filter(k => 
+      !priorityFields.includes(k.toLowerCase()) && 
+      !excludeFields.includes(k.toLowerCase())
+    )
+
+    return (
+      <div className="mb-8">
+        <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 p-6 rounded-lg">
+          <h2 className="text-2xl font-bold text-blue-900 mb-2">Product Comparison</h2>
+          <p className="text-blue-700">Comparing {products.length} products - Differences are highlighted</p>
+        </div>
+
+        <div className="bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="bg-gray-50 border-b-2 border-gray-200">
+                  <th className="px-6 py-4 text-left text-sm font-semibold text-gray-700 w-1/4 sticky left-0 bg-gray-50 z-10">
+                    Attribute
+                  </th>
+                  {products.map((product: any, idx: number) => (
+                    <th 
+                      key={idx} 
+                      className="px-6 py-4 text-left text-sm font-semibold"
+                      style={{ color: '#0078a9' }}
+                    >
+                      Product {idx + 1}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {/* Priority Fields */}
+                {priority.map((key, index) => {
+                  const different = isDifferent(key, products)
+                  return (
+                    <tr 
+                      key={key} 
+                      className={`border-b border-gray-200 ${different ? 'bg-yellow-50' : 'hover:bg-gray-50'}`}
+                    >
+                      <td className="px-6 py-4 text-sm font-semibold text-gray-700 sticky left-0 bg-white z-10">
+                        <div className="flex items-center gap-2">
+                          {formatFieldName(key)}
+                          {different && (
+                            <span className="inline-block w-2 h-2 bg-yellow-500 rounded-full" title="Different values"></span>
+                          )}
+                        </div>
+                      </td>
+                      {products.map((product: any, idx: number) => (
+                        <td 
+                          key={idx} 
+                          className={`px-6 py-4 text-sm text-gray-900 ${different ? 'font-semibold' : ''}`}
+                        >
+                          {formatValue(key, product[key]) || '-'}
+                        </td>
+                      ))}
+                    </tr>
+                  )
+                })}
+
+                {/* Section Header */}
+                <tr className="bg-gray-100">
+                  <td colSpan={products.length + 1} className="px-6 py-3 text-xs font-bold uppercase tracking-wide" style={{ color: '#0078a9' }}>
+                    Technical Specifications
+                  </td>
+                </tr>
+
+                {/* Technical Fields */}
+                {technical.map((key) => {
+                  const different = isDifferent(key, products)
+                  return (
+                    <tr 
+                      key={key} 
+                      className={`border-b border-gray-200 ${different ? 'bg-yellow-50' : 'hover:bg-gray-50'}`}
+                    >
+                      <td className="px-6 py-3 text-sm text-gray-700 sticky left-0 bg-white z-10">
+                        <div className="flex items-center gap-2">
+                          {formatFieldName(key)}
+                          {different && (
+                            <span className="inline-block w-2 h-2 bg-yellow-500 rounded-full" title="Different values"></span>
+                          )}
+                        </div>
+                      </td>
+                      {products.map((product: any, idx: number) => (
+                        <td 
+                          key={idx} 
+                          className={`px-6 py-3 text-sm text-gray-900 ${different ? 'font-semibold' : ''}`}
+                        >
+                          {formatValue(key, product[key]) || '-'}
+                        </td>
+                      ))}
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
+          <span className="inline-block w-3 h-3 bg-yellow-50 border border-yellow-200 rounded"></span>
+          <span>Highlighted rows indicate differences between products</span>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <main className="min-h-screen p-8 max-w-7xl mx-auto bg-gray-50">
       <div className="bg-white rounded-lg shadow-sm p-8 mb-8">
@@ -128,7 +269,7 @@ export default function Home() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ask anything... (e.g., 'Show me PS 870' or 'What is the color of 0890A1/2AM012PTSAL?')"
+              placeholder="Ask anything... (e.g., 'Compare 0142XCLRCA001BT and 0142XCLRCA001BTBEL')"
               className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
             />
             <button
@@ -148,6 +289,9 @@ export default function Home() {
           <strong>Error:</strong> {error}
         </div>
       )}
+
+      {/* Comparison View */}
+      {comparisonData && renderComparison()}
 
       {/* Specific Answer Display */}
       {specificAnswer && (
@@ -180,7 +324,8 @@ export default function Home() {
         </div>
       )}
 
-      {results.length > 0 && (
+      {/* Regular List View (only show if not comparison) */}
+      {results.length > 0 && !comparisonData && (
         <div>
           <div className="mb-6 flex items-center justify-between">
             <h2 className="text-2xl font-semibold" style={{ color: '#0078a9' }}>
@@ -283,7 +428,7 @@ export default function Home() {
         </div>
       )}
 
-      {!loading && results.length === 0 && query && !error && !specificAnswer && (
+      {!loading && results.length === 0 && query && !error && !specificAnswer && !comparisonData && (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <p className="text-gray-500 text-lg">No results found for "{query}"</p>
           <p className="text-gray-400 text-sm mt-2">Try a different search term</p>

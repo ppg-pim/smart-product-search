@@ -180,12 +180,15 @@ SEARCH RULES:
 1. **EXACT SKU MATCH**: When user provides a complete SKU (e.g., "0870A00276012PT"), use EXACT match with "eq" operator
 2. **PARTIAL SEARCH**: When user says "show me", "find", "search for" with partial terms, use "ilike" with wildcards
 3. **BROAD SEARCH**: When unsure, prefer broader searches with "ilike" and "any" (OR logic)
-4. For text searches, use "ilike" with wildcards: "%search%"
-5. **DEFAULT TO SHOWING RESULTS**: When in doubt, return results rather than being too restrictive
+4. **COMPARISON**: When user asks to compare, show difference, or contrast products, use "comparison" questionType
+5. For text searches, use "ilike" with wildcards: "%search%"
+6. **DEFAULT TO SHOWING RESULTS**: When in doubt, return results rather than being too restrictive
 
 IMPORTANT INTENT DETECTION:
 - "show details of [EXACT_SKU]" → eq operator, limit: 1
 - "what is the [field] of [EXACT_SKU]" → eq operator, questionType: "specific"
+- "compare [SKU1] and [SKU2]" → questionType: "comparison", compareProducts: ["SKU1", "SKU2"]
+- "difference between [SKU1] and [SKU2]" → questionType: "comparison", compareProducts: ["SKU1", "SKU2"]
 - "show me [partial]" → ilike operator, searchType: "any", limit: null
 - "find [partial]" → ilike operator, searchType: "any", limit: null
 - "products with [term]" → ilike operator, searchType: "any", limit: null
@@ -201,7 +204,8 @@ RESPONSE FORMAT (JSON):
     }
   ],
   "searchType": "all" | "any",
-  "questionType": "list" | "specific",
+  "questionType": "list" | "specific" | "comparison",
+  "compareProducts": ["SKU1", "SKU2"],
   "extractFields": ["field1", "field2"],
   "answerTemplate": "The color is {color}",
   "orderBy": {
@@ -238,27 +242,27 @@ Response: {
   "limit": 1
 }
 
-Query: "Show me PS 870"
+Query: "Compare 0142XCLRCA001BT and 0142XCLRCA001BTBEL"
 Response: {
   "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%PS 870%"},
-    {"column": "sku", "operator": "ilike", "value": "%PS870%"},
-    {"column": "name", "operator": "ilike", "value": "%PS 870%"},
-    {"column": "name", "operator": "ilike", "value": "%PS870%"}
+    {"column": "sku", "operator": "eq", "value": "0142XCLRCA001BT"},
+    {"column": "sku", "operator": "eq", "value": "0142XCLRCA001BTBEL"}
   ],
   "searchType": "any",
-  "questionType": "list",
+  "questionType": "comparison",
+  "compareProducts": ["0142XCLRCA001BT", "0142XCLRCA001BTBEL"],
   "limit": null
 }
 
-Query: "Find 870"
+Query: "Show the difference between 0142XCLRCA001BT and 0142XCLRCA001BTBEL"
 Response: {
   "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%870%"},
-    {"column": "name", "operator": "ilike", "value": "%870%"}
+    {"column": "sku", "operator": "eq", "value": "0142XCLRCA001BT"},
+    {"column": "sku", "operator": "eq", "value": "0142XCLRCA001BTBEL"}
   ],
   "searchType": "any",
-  "questionType": "list",
+  "questionType": "comparison",
+  "compareProducts": ["0142XCLRCA001BT", "0142XCLRCA001BTBEL"],
   "limit": null
 }
 
@@ -272,19 +276,6 @@ Response: {
   "extractFields": ["sku", "color", "colour", "name"],
   "answerTemplate": "The color of {sku} is {color}",
   "limit": 1
-}
-
-Query: "Products containing blue"
-Response: {
-  "filters": [
-    {"column": "name", "operator": "ilike", "value": "%blue%"},
-    {"column": "description", "operator": "ilike", "value": "%blue%"},
-    {"column": "color", "operator": "ilike", "value": "%blue%"},
-    {"column": "colour", "operator": "ilike", "value": "%blue%"}
-  ],
-  "searchType": "any",
-  "questionType": "list",
-  "limit": null
 }`
         },
         {
@@ -397,10 +388,20 @@ Response: {
 
     console.log(`✅ Query returned ${data?.length || 0} results`)
 
-    // Clean and flatten the results - FIXED LINE
+    // Clean and flatten the results
     const cleanedResults = data?.map((product: ProductRecord) => cleanProductData(product)) || []
 
-    // Step 4: Handle specific questions
+    // Step 4: Handle comparison questions
+    if (searchParams.questionType === "comparison" && cleanedResults.length >= 2) {
+      return NextResponse.json({
+        success: true,
+        questionType: "comparison",
+        products: cleanedResults,
+        compareProducts: searchParams.compareProducts || []
+      })
+    }
+
+    // Step 5: Handle specific questions
     if (searchParams.questionType === "specific" && cleanedResults.length > 0) {
       const product = cleanedResults[0]
       const extractFields = searchParams.extractFields || []
