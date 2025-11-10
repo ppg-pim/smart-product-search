@@ -51,7 +51,7 @@ export default function Home() {
 
   // Group attributes by category for better display
   const groupAttributes = (product: any) => {
-    const priorityFields = ['sku', 'name', 'description']
+    const priorityFields = ['sku', 'name', 'product_name', 'productname', 'description', 'product_description']
     const footerFields = ['created_at', 'updated_at', 'createdat', 'updatedat']
     const searchableFields = ['searchable_text', 'searchabletext', 'searchable']
     
@@ -79,6 +79,20 @@ export default function Home() {
 
   // Format field name for display
   const formatFieldName = (key: string): string => {
+    // Handle specific field mappings
+    const fieldMappings: { [key: string]: string } = {
+      'sku': 'SKU',
+      'product_name': 'Product Name',
+      'productname': 'Product Name',
+      'product_description': 'Description',
+    }
+    
+    const lowerKey = key.toLowerCase()
+    if (fieldMappings[lowerKey]) {
+      return fieldMappings[lowerKey]
+    }
+    
+    // Default formatting
     return key
       .replace(/_/g, ' ')
       .replace(/\b\w/g, (char) => char.toUpperCase())
