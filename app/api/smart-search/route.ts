@@ -440,7 +440,7 @@ CRITICAL RULES:
         const compareProducts = searchParams.compareProducts || []
         const groupedProducts: ProductRecord[] = []
         
-        compareProducts.forEach(term => {
+        compareProducts.forEach((term: string) => {
           const matchedProduct = cleanedResults.find((p: ProductRecord) => 
             (p.sku && p.sku.toLowerCase().includes(term.toLowerCase())) ||
             (p.product_name && p.product_name.toLowerCase().includes(term.toLowerCase())) ||
