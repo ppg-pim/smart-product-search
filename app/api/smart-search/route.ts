@@ -8,7 +8,7 @@ const openai = new OpenAI({
 
 type ProductRecord = Record<string, any>
 
-// Enhanced HTML stripping with better entity handling
+// Enhanced HTML stripping with comprehensive entity handling
 function stripHtml(html: string): string {
   if (typeof html !== 'string') return html
   return html
@@ -517,7 +517,6 @@ CRITICAL RULES:
     if ((!data || data.length === 0) && searchParams.filters.length > 0) {
       console.log('🔄 No results found, trying fallback search...')
       
-      // Extract search terms from filters
       const searchTerms = new Set<string>()
       searchParams.filters.forEach((filter: any) => {
         if (filter.value) {
@@ -569,11 +568,9 @@ CRITICAL RULES:
       console.log(`🔄 Comparison mode - found ${cleanedResults.length} products`)
       
       if (cleanedResults.length >= 2) {
-        // Smart product grouping for comparison
         const compareProducts = searchParams.compareProducts || []
         const groupedProducts: ProductRecord[] = []
         
-        // Try to find one product for each comparison term
         compareProducts.forEach((term: string) => {
           const cleanTerm = term.replace(/[\s-]/g, '').toLowerCase()
           
@@ -587,7 +584,6 @@ CRITICAL RULES:
           }
         })
         
-        // If we found matches for comparison terms, use those; otherwise use first 2 results
         const productsToCompare = groupedProducts.length >= 2 
           ? groupedProducts.slice(0, 2) 
           : cleanedResults.slice(0, 2)
@@ -633,7 +629,7 @@ RULES:
 - Extract ALL relevant information
 - Format lists with bullet points using "•"
 - Remove all HTML tags
-- Convert HTML entities (e.g., &deg; to °)
+- Convert HTML entities (e.g., &deg; to °, &reg; to ®)
 - Be specific and complete
 
 PRODUCT DATA:
