@@ -19,8 +19,37 @@ function stripHtml(html: string): string {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'")
     .replace(/&deg;/g, '°')
+    .replace(/&reg;/g, '®')
+    .replace(/&copy;/g, '©')
+    .replace(/&trade;/g, '™')
+    .replace(/&euro;/g, '€')
+    .replace(/&pound;/g, '£')
+    .replace(/&yen;/g, '¥')
+    .replace(/&cent;/g, '¢')
+    .replace(/&sect;/g, '§')
+    .replace(/&para;/g, '¶')
+    .replace(/&middot;/g, '·')
+    .replace(/&bull;/g, '•')
+    .replace(/&hellip;/g, '…')
+    .replace(/&ndash;/g, '–')
+    .replace(/&mdash;/g, '—')
+    .replace(/&lsquo;/g, ''')
+    .replace(/&rsquo;/g, ''')
+    .replace(/&ldquo;/g, '"')
+    .replace(/&rdquo;/g, '"')
+    .replace(/&times;/g, '×')
+    .replace(/&divide;/g, '÷')
+    .replace(/&plusmn;/g, '±')
+    .replace(/&frac14;/g, '¼')
+    .replace(/&frac12;/g, '½')
+    .replace(/&frac34;/g, '¾')
+    // Numeric entities (decimal)
     .replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(dec))
+    // Numeric entities (hexadecimal)
+    .replace(/&#x([0-9a-fA-F]+);/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)))
+    // Catch any remaining entities
     .replace(/&([a-z]+);/gi, (match, entity) => {
       const entities: Record<string, string> = {
         'nbsp': ' ',
@@ -28,7 +57,32 @@ function stripHtml(html: string): string {
         'lt': '<',
         'gt': '>',
         'quot': '"',
+        'apos': "'",
         'deg': '°',
+        'reg': '®',
+        'copy': '©',
+        'trade': '™',
+        'euro': '€',
+        'pound': '£',
+        'yen': '¥',
+        'cent': '¢',
+        'sect': '§',
+        'para': '¶',
+        'middot': '·',
+        'bull': '•',
+        'hellip': '…',
+        'ndash': '–',
+        'mdash': '—',
+        'lsquo': ''',
+        'rsquo': ''',
+        'ldquo': '"',
+        'rdquo': '"',
+        'times': '×',
+        'divide': '÷',
+        'plusmn': '±',
+        'frac14': '¼',
+        'frac12': '½',
+        'frac34': '¾',
       }
       return entities[entity.toLowerCase()] || match
     })
