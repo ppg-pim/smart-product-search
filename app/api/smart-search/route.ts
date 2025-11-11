@@ -95,7 +95,6 @@ function truncateProductForAI(product: ProductRecord, maxLength: number = 8000):
   let result = JSON.stringify(product, null, 2)
   
   if (result.length > maxLength) {
-    // Prioritize important fields
     const priorityFields = ['sku', 'product_name', 'name', 'description', 'color', 'colour']
     const truncated: ProductRecord = {}
     
@@ -105,7 +104,6 @@ function truncateProductForAI(product: ProductRecord, maxLength: number = 8000):
       }
     })
     
-    // Add other fields until we reach the limit
     Object.keys(product).forEach(key => {
       if (!priorityFields.includes(key)) {
         const testResult = JSON.stringify({ ...truncated, [key]: product[key] })
@@ -214,31 +212,35 @@ IMPORTANT NOTES:
 - The "searchable_text" column contains ALL product information (flattened from all_attributes)
 - Product identifiers can be in "sku", "product_name", or "name" columns
 - Use BROAD searches with "ilike" and wildcards for maximum accuracy
-- ALWAYS search "searchable_text" column for product attributes
-- Product names may appear with or without spaces/dashes (e.g., "PS870", "PS-870", "PS 870")
+- Products may have variants (e.g., "P/S 870 Class A", "P/S 870 Class B", "P/S 870 Class C")
+- When user asks for a product family (e.g., "PS 870"), show ALL variants
 
 SEARCH STRATEGY FOR HIGH ACCURACY:
-1. **COMPARISON QUERIES** ("difference", "compare", "vs", "versus", "between"):
-   - Set questionType: "comparison"
-   - Extract product identifiers (SKU, name, or partial match)
-   - Create MULTIPLE filter variations for each product (with/without spaces, dashes)
+
+1. **SINGLE PRODUCT QUERY** (e.g., "PS 870", "PR-148"):
+   - Set questionType: "list"
+   - Search broadly: %PS%870% will match "PS870", "PS-870", "PS 870", "P/S 870"
    - Search in: sku, product_name, name, searchable_text
-   - Use "any" searchType (OR logic) to find all matches
-   - CRITICAL: Create filters for EACH product separately with wildcards
+   - Use "any" searchType to find ALL variants
+   - Set limit: null (to show all variants like Class A, B, C)
 
-2. **ATTRIBUTE QUESTIONS** ("what is the [attribute] of [product]"):
+2. **COMPARISON QUERIES** ("difference", "compare", "vs", "versus", "between"):
+   - Set questionType: "comparison"
+   - Extract product identifiers
+   - Create filters for EACH product with wildcards
+   - Search in: sku, product_name, name, searchable_text
+   - Use "any" searchType (OR logic)
+   - Set limit: null
+
+3. **ATTRIBUTE QUESTIONS** ("what is the [attribute] of [product]"):
    - Set questionType: "specific_ai"
-   - Search broadly in searchable_text for product identifier
+   - Search broadly for product identifier
    - Let AI extract the specific attribute from results
+   - Set limit: 5
 
-3. **EXACT SKU LOOKUP**:
+4. **EXACT SKU LOOKUP**:
    - Use "eq" operator only if SKU format is exact (e.g., "0870A00276012PT")
    - Otherwise use "ilike" with wildcards
-
-4. **PARTIAL/FUZZY SEARCH**:
-   - Always use "ilike" with "%term%" wildcards
-   - Search multiple columns: sku, product_name, name, searchable_text
-   - Use "any" searchType for broader results
 
 RESPONSE FORMAT (JSON):
 {
@@ -257,6 +259,19 @@ RESPONSE FORMAT (JSON):
 }
 
 EXAMPLES:
+
+Query: "PS 870"
+Response: {
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%PS%870%"},
+    {"column": "product_name", "operator": "ilike", "value": "%PS%870%"},
+    {"column": "name", "operator": "ilike", "value": "%PS%870%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%PS%870%"}
+  ],
+  "searchType": "any",
+  "questionType": "list",
+  "limit": null
+}
 
 Query: "what is the difference between ps 870 and ps 890"
 Response: {
@@ -279,18 +294,14 @@ Response: {
 Query: "what is the different PR-148 and PR-187"
 Response: {
   "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%PR-148%"},
-    {"column": "sku", "operator": "ilike", "value": "%PR148%"},
-    {"column": "product_name", "operator": "ilike", "value": "%PR-148%"},
-    {"column": "product_name", "operator": "ilike", "value": "%PR148%"},
-    {"column": "name", "operator": "ilike", "value": "%PR-148%"},
-    {"column": "searchable_text", "operator": "ilike", "value": "%PR-148%"},
-    {"column": "sku", "operator": "ilike", "value": "%PR-187%"},
-    {"column": "sku", "operator": "ilike", "value": "%PR187%"},
-    {"column": "product_name", "operator": "ilike", "value": "%PR-187%"},
-    {"column": "product_name", "operator": "ilike", "value": "%PR187%"},
-    {"column": "name", "operator": "ilike", "value": "%PR-187%"},
-    {"column": "searchable_text", "operator": "ilike", "value": "%PR-187%"}
+    {"column": "sku", "operator": "ilike", "value": "%PR%148%"},
+    {"column": "product_name", "operator": "ilike", "value": "%PR%148%"},
+    {"column": "name", "operator": "ilike", "value": "%PR%148%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%PR%148%"},
+    {"column": "sku", "operator": "ilike", "value": "%PR%187%"},
+    {"column": "product_name", "operator": "ilike", "value": "%PR%187%"},
+    {"column": "name", "operator": "ilike", "value": "%PR%187%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%PR%187%"}
   ],
   "searchType": "any",
   "questionType": "comparison",
@@ -334,14 +345,12 @@ Response: {
   "limit": null
 }
 
-CRITICAL RULES FOR COMPARISONS:
-- For "difference between X and Y", create separate filters for EACH product
-- Use wildcards: %PS%870% will match "PS870", "PS-870", "PS 870", "APS870B"
-- Search ALL relevant columns (sku, product_name, name, searchable_text) for EACH product
-- ALWAYS use "any" searchType for comparisons
-- Set limit to null for comparisons to get all matches
-- Extract both product identifiers for compareProducts array
-- Create variations with/without spaces and dashes for better matching`
+CRITICAL RULES:
+- For single product queries, use "list" questionType and limit: null to show ALL variants
+- For comparisons, ALWAYS use "any" searchType and limit: null
+- Use wildcards liberally: %PS%870% matches "PS870", "PS-870", "PS 870", "P/S 870", "APS870B"
+- Search multiple columns (sku, product_name, name, searchable_text) for better matches
+- When user asks for product family (e.g., "PS 870"), return ALL related products (Class A, B, C, etc.)`
         },
         {
           role: 'user',
@@ -349,7 +358,8 @@ CRITICAL RULES FOR COMPARISONS:
         }
       ],
       response_format: { type: 'json_object' },
-      temperature: 0.1
+      temperature: 0.1,
+      max_tokens: 2000
     })
 
     let searchParams
@@ -383,7 +393,7 @@ CRITICAL RULES FOR COMPARISONS:
         
         if (orConditionString) {
           dbQuery = dbQuery.or(orConditionString)
-          console.log('✅ OR conditions applied:', orConditionString)
+          console.log('✅ OR conditions applied')
         }
       } else {
         const validFilters = searchParams.filters.filter((filter: any) => 
@@ -449,31 +459,42 @@ CRITICAL RULES FOR COMPARISONS:
 
     console.log(`✅ Query returned ${data?.length || 0} results`)
 
-    // FALLBACK: If comparison query returned no results, try simpler search
-    if ((!data || data.length === 0) && searchParams.questionType === "comparison" && searchParams.compareProducts?.length > 0) {
+    // FALLBACK: If no results, try simpler search
+    if ((!data || data.length === 0) && searchParams.filters.length > 0) {
       console.log('🔄 No results found, trying fallback search...')
       
-      const fallbackFilters: string[] = []
-      searchParams.compareProducts.forEach((product: string) => {
-        // Remove spaces and special characters for broader match
-        const cleanProduct = product.replace(/[\s-]/g, '')
-        fallbackFilters.push(`searchable_text.ilike.%${cleanProduct}%`)
-        fallbackFilters.push(`sku.ilike.%${cleanProduct}%`)
-        fallbackFilters.push(`product_name.ilike.%${cleanProduct}%`)
-        fallbackFilters.push(`name.ilike.%${cleanProduct}%`)
+      // Extract search terms from filters
+      const searchTerms = new Set<string>()
+      searchParams.filters.forEach((filter: any) => {
+        if (filter.value) {
+          const cleanTerm = filter.value.replace(/%/g, '').replace(/[\s-]/g, '')
+          if (cleanTerm.length > 2) {
+            searchTerms.add(cleanTerm)
+          }
+        }
       })
       
-      const fallbackQuery = supabase
-        .from('products')
-        .select('*')
-        .or(fallbackFilters.join(','))
-        .limit(1000)
-      
-      const fallbackResult = await fallbackQuery
-      
-      if (!fallbackResult.error && fallbackResult.data && fallbackResult.data.length > 0) {
-        console.log(`✅ Fallback search found ${fallbackResult.data.length} results`)
-        data = fallbackResult.data
+      if (searchTerms.size > 0) {
+        const fallbackFilters: string[] = []
+        Array.from(searchTerms).forEach(term => {
+          fallbackFilters.push(`searchable_text.ilike.%${term}%`)
+          fallbackFilters.push(`sku.ilike.%${term}%`)
+          fallbackFilters.push(`product_name.ilike.%${term}%`)
+          fallbackFilters.push(`name.ilike.%${term}%`)
+        })
+        
+        const fallbackQuery = supabase
+          .from('products')
+          .select('*')
+          .or(fallbackFilters.join(','))
+          .limit(1000)
+        
+        const fallbackResult = await fallbackQuery
+        
+        if (!fallbackResult.error && fallbackResult.data && fallbackResult.data.length > 0) {
+          console.log(`✅ Fallback search found ${fallbackResult.data.length} results`)
+          data = fallbackResult.data
+        }
       }
     }
 
@@ -483,7 +504,7 @@ CRITICAL RULES FOR COMPARISONS:
         questionType: "list",
         results: [],
         count: 0,
-        message: "No products found matching your query"
+        message: "No products found matching your query. Try using different keywords or partial product names."
       })
     }
 
@@ -494,17 +515,20 @@ CRITICAL RULES FOR COMPARISONS:
       console.log(`🔄 Comparison mode - found ${cleanedResults.length} products`)
       
       if (cleanedResults.length >= 2) {
-        // Group products by similarity to comparison terms
+        // Smart product grouping for comparison
         const compareProducts = searchParams.compareProducts || []
         const groupedProducts: ProductRecord[] = []
         
+        // Try to find one product for each comparison term
         compareProducts.forEach((term: string) => {
-          const matchedProduct = cleanedResults.find((p: ProductRecord) => 
-            (p.sku && p.sku.toLowerCase().includes(term.toLowerCase().replace(/[\s-]/g, ''))) ||
-            (p.product_name && p.product_name.toLowerCase().includes(term.toLowerCase().replace(/[\s-]/g, ''))) ||
-            (p.name && p.name.toLowerCase().includes(term.toLowerCase().replace(/[\s-]/g, '')))
-          )
-          if (matchedProduct && !groupedProducts.includes(matchedProduct)) {
+          const cleanTerm = term.replace(/[\s-]/g, '').toLowerCase()
+          
+          const matchedProduct = cleanedResults.find((p: ProductRecord) => {
+            const productStr = JSON.stringify(p).toLowerCase().replace(/[\s-]/g, '')
+            return productStr.includes(cleanTerm) && !groupedProducts.includes(p)
+          })
+          
+          if (matchedProduct) {
             groupedProducts.push(matchedProduct)
           }
         })
@@ -527,7 +551,7 @@ CRITICAL RULES FOR COMPARISONS:
           questionType: "list",
           results: cleanedResults,
           count: cleanedResults.length,
-          message: "Found only one product. Need at least 2 products for comparison."
+          message: `Found only ${cleanedResults.length} product(s). Need at least 2 products for comparison.`
         })
       }
     }
@@ -540,7 +564,6 @@ CRITICAL RULES FOR COMPARISONS:
       console.log('🤖 Using AI to extract answer from product data')
       
       try {
-        // Truncate product data to avoid token limits
         const productDataString = truncateProductForAI(product, 8000)
         
         const answerCompletion = await openai.chat.completions.create({
@@ -586,7 +609,6 @@ ${productDataString}`
         })
       } catch (aiError: any) {
         console.error('❌ AI extraction error:', aiError.message)
-        // Fallback: return the product data
         return NextResponse.json({
           success: true,
           questionType: "list",
@@ -608,7 +630,6 @@ ${productDataString}`
   } catch (error: any) {
     console.error('❌ Smart search error:', error)
     
-    // Return detailed error for debugging
     return NextResponse.json(
       { 
         success: false,
