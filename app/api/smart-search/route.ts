@@ -35,10 +35,10 @@ function stripHtml(html: string): string {
     .replace(/&hellip;/g, '…')
     .replace(/&ndash;/g, '–')
     .replace(/&mdash;/g, '—')
-    .replace(/&lsquo;/g, ''')
-    .replace(/&rsquo;/g, ''')
-    .replace(/&ldquo;/g, '"')
-    .replace(/&rdquo;/g, '"')
+    .replace(/&lsquo;/g, '\u2018')
+    .replace(/&rsquo;/g, '\u2019')
+    .replace(/&ldquo;/g, '\u201C')
+    .replace(/&rdquo;/g, '\u201D')
     .replace(/&times;/g, '×')
     .replace(/&divide;/g, '÷')
     .replace(/&plusmn;/g, '±')
@@ -73,10 +73,10 @@ function stripHtml(html: string): string {
         'hellip': '…',
         'ndash': '–',
         'mdash': '—',
-        'lsquo': ''',
-        'rsquo': ''',
-        'ldquo': '"',
-        'rdquo': '"',
+        'lsquo': '\u2018',
+        'rsquo': '\u2019',
+        'ldquo': '\u201C',
+        'rdquo': '\u201D',
         'times': '×',
         'divide': '÷',
         'plusmn': '±',
