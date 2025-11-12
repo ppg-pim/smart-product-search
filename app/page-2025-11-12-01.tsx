@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 
 export default function Home() {
   const [query, setQuery] = useState('')
@@ -9,36 +9,6 @@ export default function Home() {
   const [error, setError] = useState('')
   const [specificAnswer, setSpecificAnswer] = useState<any>(null)
   const [comparisonData, setComparisonData] = useState<any>(null)
-  
-  // Filter states
-  const [selectedFamily, setSelectedFamily] = useState('')
-  const [selectedProductType, setSelectedProductType] = useState('')
-  const [selectedSpecification, setSelectedSpecification] = useState('')
-  const [showFilters, setShowFilters] = useState(false)
-  
-  // Available filter options (will be populated from API)
-  const [familyOptions, setFamilyOptions] = useState<string[]>([])
-  const [productTypeOptions, setProductTypeOptions] = useState<string[]>([])
-  const [specificationOptions, setSpecificationOptions] = useState<string[]>([])
-
-  // Load filter options on mount
-  useEffect(() => {
-    loadFilterOptions()
-  }, [])
-
-  const loadFilterOptions = async () => {
-    try {
-      const response = await fetch('/api/filter-options')
-      if (response.ok) {
-        const data = await response.json()
-        setFamilyOptions(data.families || [])
-        setProductTypeOptions(data.productTypes || [])
-        setSpecificationOptions(data.specifications || [])
-      }
-    } catch (err) {
-      console.error('Failed to load filter options:', err)
-    }
-  }
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -54,14 +24,7 @@ export default function Home() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
-          query,
-          filters: {
-            family: selectedFamily,
-            productType: selectedProductType,
-            specification: selectedSpecification
-          }
-        }),
+        body: JSON.stringify({ query }),
       })
 
       const data = await response.json()
@@ -93,14 +56,6 @@ export default function Home() {
     }
   }
 
-  const clearFilters = () => {
-    setSelectedFamily('')
-    setSelectedProductType('')
-    setSelectedSpecification('')
-  }
-
-  const hasActiveFilters = selectedFamily || selectedProductType || selectedSpecification
-
   // Group attributes by category for better display
   const groupAttributes = (product: any) => {
     const priorityFields = ['sku', 'name', 'product_name', 'productname', 'description', 'product_description']
@@ -111,14 +66,9 @@ export default function Home() {
     const footer: any = {}
     const searchable: any = {}
     const other: any = {}
-    const seen = new Set<string>()
 
     Object.entries(product).forEach(([key, value]) => {
       const lowerKey = key.toLowerCase()
-      
-      // Skip if we've already seen this key (case-insensitive)
-      if (seen.has(lowerKey)) return
-      seen.add(lowerKey)
       
       if (priorityFields.includes(lowerKey)) {
         priority[key] = value
@@ -170,16 +120,8 @@ export default function Home() {
   // Get all unique keys from products for comparison
   const getAllKeys = (products: any[]) => {
     const allKeys = new Set<string>()
-    const seenLowerKeys = new Set<string>()
-    
     products.forEach(product => {
-      Object.keys(product).forEach(key => {
-        const lowerKey = key.toLowerCase()
-        if (!seenLowerKeys.has(lowerKey)) {
-          allKeys.add(key)
-          seenLowerKeys.add(lowerKey)
-        }
-      })
+      Object.keys(product).forEach(key => allKeys.add(key))
     })
     return Array.from(allKeys)
   }
@@ -237,7 +179,7 @@ export default function Home() {
               </thead>
               <tbody>
                 {/* Priority Fields */}
-                {priority.map((key) => {
+                {priority.map((key, index) => {
                   const different = isDifferent(key, products)
                   return (
                     <tr 
@@ -322,7 +264,7 @@ export default function Home() {
         </p>
 
         <form onSubmit={handleSearch}>
-          <div className="flex gap-4 mb-4">
+          <div className="flex gap-4">
             <input
               type="text"
               value={query}
@@ -330,26 +272,6 @@ export default function Home() {
               placeholder="Ask anything... (e.g., 'Compare 0142XCLRCA001BT and 0142XCLRCA001BTBEL')"
               className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
             />
-            <button
-              type="button"
-              onClick={() => setShowFilters(!showFilters)}
-              className="px-6 py-3 border-2 rounded-lg font-medium transition-colors"
-              style={{ 
-                borderColor: '#0078a9',
-                color: showFilters ? '#fff' : '#0078a9',
-                backgroundColor: showFilters ? '#0078a9' : 'transparent'
-              }}
-            >
-              <svg className="w-5 h-5 inline-block mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-              </svg>
-              Filters
-              {hasActiveFilters && (
-                <span className="ml-2 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-red-500 rounded-full">
-                  {[selectedFamily, selectedProductType, selectedSpecification].filter(Boolean).length}
-                </span>
-              )}
-            </button>
             <button
               type="submit"
               disabled={loading || !query.trim()}
@@ -359,127 +281,6 @@ export default function Home() {
               {loading ? 'Searching...' : 'Search'}
             </button>
           </div>
-
-          {/* Filter Panel */}
-          {showFilters && (
-            <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold" style={{ color: '#0078a9' }}>
-                  Filter Options
-                </h3>
-                {hasActiveFilters && (
-                  <button
-                    type="button"
-                    onClick={clearFilters}
-                    className="text-sm text-red-600 hover:text-red-800 font-medium"
-                  >
-                    Clear All Filters
-                  </button>
-                )}
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* Family Filter */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Family
-                  </label>
-                  <select
-                    value={selectedFamily}
-                    onChange={(e) => setSelectedFamily(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
-                  >
-                    <option value="">All Families</option>
-                    {familyOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Product Type Filter */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Product Type
-                  </label>
-                  <select
-                    value={selectedProductType}
-                    onChange={(e) => setSelectedProductType(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
-                  >
-                    <option value="">All Types</option>
-                    {productTypeOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Specification Filter */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Specification
-                  </label>
-                  <select
-                    value={selectedSpecification}
-                    onChange={(e) => setSelectedSpecification(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
-                  >
-                    <option value="">All Specifications</option>
-                    {specificationOptions.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {hasActiveFilters && (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  <span className="text-sm text-gray-600">Active filters:</span>
-                  {selectedFamily && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
-                      Family: {selectedFamily}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedFamily('')}
-                        className="ml-2 text-blue-600 hover:text-blue-800"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  )}
-                  {selectedProductType && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                      Type: {selectedProductType}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedProductType('')}
-                        className="ml-2 text-green-600 hover:text-green-800"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  )}
-                  {selectedSpecification && (
-                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-100 text-purple-800">
-                      Spec: {selectedSpecification}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedSpecification('')}
-                        className="ml-2 text-purple-600 hover:text-purple-800"
-                      >
-                        ×
-                      </button>
-                    </span>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
         </form>
       </div>
 

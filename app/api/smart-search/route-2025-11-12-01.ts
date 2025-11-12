@@ -92,16 +92,11 @@ function stripHtml(html: string): string {
 // Helper function to clean and flatten product data
 function cleanProductData(product: ProductRecord): ProductRecord {
   const cleaned: ProductRecord = {}
-  const seen = new Set<string>()
   
   const excludeFields = ['embedding', 'all_attributes']
   
   Object.keys(product).forEach(key => {
-    const lowerKey = key.toLowerCase()
-    
-    // Skip if already seen (case-insensitive) or excluded
-    if (seen.has(lowerKey) || excludeFields.includes(key)) return
-    seen.add(lowerKey)
+    if (excludeFields.includes(key)) return
     
     const value = product[key]
     
@@ -128,12 +123,6 @@ function cleanProductData(product: ProductRecord): ProductRecord {
       }
       
       Object.keys(attributes).forEach(key => {
-        const lowerKey = key.toLowerCase()
-        
-        // Skip if already seen (case-insensitive)
-        if (seen.has(lowerKey)) return
-        seen.add(lowerKey)
-        
         const value = attributes[key]
         
         if (value === null || value === undefined || value === '') return
@@ -219,7 +208,7 @@ function buildOrConditions(filters: any[], columns: string[]): string | null {
 
 export async function POST(request: NextRequest) {
   try {
-    const { query, filters } = await request.json()
+    const { query } = await request.json()
 
     if (!query) {
       return NextResponse.json(
@@ -229,7 +218,6 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('🔍 User query:', query)
-    console.log('🎯 Applied filters:', filters)
 
     // Step 1: Get table schema with sample data
     const { data: sampleData, error: schemaError } = await supabase
@@ -274,16 +262,12 @@ Columns: ${columns.join(', ')}
 SAMPLE DATA STRUCTURE:
 ${JSON.stringify(samplePreview, null, 2)}
 
-USER APPLIED FILTERS:
-${filters ? JSON.stringify(filters, null, 2) : 'None'}
-
 IMPORTANT NOTES:
 - The "searchable_text" column contains ALL product information (flattened from all_attributes)
 - Product identifiers can be in "sku", "product_name", or "name" columns
 - Use BROAD searches with "ilike" and wildcards for maximum accuracy
 - Products may have variants (e.g., "P/S 870 Class A", "P/S 870 Class B", "P/S 870 Class C")
 - When user asks for a product family (e.g., "PS 870"), show ALL variants
-- If user has applied filters (family, productType, specification), incorporate them into the search
 
 SEARCH STRATEGY FOR HIGH ACCURACY:
 
@@ -361,6 +345,60 @@ Response: {
   "limit": null
 }
 
+Query: "what is the different PR-148 and PR-187"
+Response: {
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%PR%148%"},
+    {"column": "product_name", "operator": "ilike", "value": "%PR%148%"},
+    {"column": "name", "operator": "ilike", "value": "%PR%148%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%PR%148%"},
+    {"column": "sku", "operator": "ilike", "value": "%PR%187%"},
+    {"column": "product_name", "operator": "ilike", "value": "%PR%187%"},
+    {"column": "name", "operator": "ilike", "value": "%PR%187%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%PR%187%"}
+  ],
+  "searchType": "any",
+  "questionType": "comparison",
+  "compareProducts": ["PR-148", "PR-187"],
+  "limit": null
+}
+
+Query: "What is the color of PR-1440M Class B"
+Response: {
+  "filters": [
+    {"column": "searchable_text", "operator": "ilike", "value": "%PR-1440M%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%Class B%"}
+  ],
+  "searchType": "all",
+  "questionType": "specific_ai",
+  "attributeQuestion": "What is the color?",
+  "limit": 5
+}
+
+Query: "what is the cure time of 0821XXXXXX651SKCS"
+Response: {
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%0821%651SKCS%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%0821%651SKCS%"}
+  ],
+  "searchType": "any",
+  "questionType": "specific_ai",
+  "attributeQuestion": "What is the cure time?",
+  "limit": 5
+}
+
+Query: "Compare 0142XCLRCA001BT and 0142XCLRCA001BTBEL"
+Response: {
+  "filters": [
+    {"column": "sku", "operator": "eq", "value": "0142XCLRCA001BT"},
+    {"column": "sku", "operator": "eq", "value": "0142XCLRCA001BTBEL"}
+  ],
+  "searchType": "any",
+  "questionType": "comparison",
+  "compareProducts": ["0142XCLRCA001BT", "0142XCLRCA001BTBEL"],
+  "limit": null
+}
+
 CRITICAL RULES:
 - For single product queries, use "list" questionType and limit: null to show ALL variants
 - For comparisons, ALWAYS use "any" searchType and limit: null
@@ -400,22 +438,6 @@ CRITICAL RULES:
 
     // Step 3: Build Supabase query
     let dbQuery: any = supabase.from('products').select('*')
-
-    // Apply user-selected filters first
-    if (filters) {
-      if (filters.family && columns.includes('family')) {
-        dbQuery = dbQuery.eq('family', filters.family)
-        console.log(`🎯 Applied family filter: ${filters.family}`)
-      }
-      if (filters.productType && columns.includes('product_type')) {
-        dbQuery = dbQuery.eq('product_type', filters.productType)
-        console.log(`🎯 Applied product type filter: ${filters.productType}`)
-      }
-      if (filters.specification && columns.includes('specification')) {
-        dbQuery = dbQuery.eq('specification', filters.specification)
-        console.log(`🎯 Applied specification filter: ${filters.specification}`)
-      }
-    }
 
     if (searchParams.filters.length > 0) {
       console.log(`🔍 Applying ${searchParams.filters.length} filters with ${searchParams.searchType} logic`)
@@ -514,24 +536,11 @@ CRITICAL RULES:
           fallbackFilters.push(`name.ilike.%${term}%`)
         })
         
-        let fallbackQuery = supabase
+        const fallbackQuery = supabase
           .from('products')
           .select('*')
           .or(fallbackFilters.join(','))
           .limit(1000)
-        
-        // Re-apply user filters to fallback
-        if (filters) {
-          if (filters.family && columns.includes('family')) {
-            fallbackQuery = fallbackQuery.eq('family', filters.family)
-          }
-          if (filters.productType && columns.includes('product_type')) {
-            fallbackQuery = fallbackQuery.eq('product_type', filters.productType)
-          }
-          if (filters.specification && columns.includes('specification')) {
-            fallbackQuery = fallbackQuery.eq('specification', filters.specification)
-          }
-        }
         
         const fallbackResult = await fallbackQuery
         
