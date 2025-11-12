@@ -45,44 +45,16 @@ function stripHtml(html: string): string {
     .replace(/&frac14;/g, '¼')
     .replace(/&frac12;/g, '½')
     .replace(/&frac34;/g, '¾')
-    // Numeric entities (decimal)
     .replace(/&#(\d+);/g, (match, dec) => String.fromCharCode(dec))
-    // Numeric entities (hexadecimal)
     .replace(/&#x([0-9a-fA-F]+);/g, (match, hex) => String.fromCharCode(parseInt(hex, 16)))
-    // Catch any remaining entities
     .replace(/&([a-z]+);/gi, (match, entity) => {
       const entities: Record<string, string> = {
-        'nbsp': ' ',
-        'amp': '&',
-        'lt': '<',
-        'gt': '>',
-        'quot': '"',
-        'apos': "'",
-        'deg': '°',
-        'reg': '®',
-        'copy': '©',
-        'trade': '™',
-        'euro': '€',
-        'pound': '£',
-        'yen': '¥',
-        'cent': '¢',
-        'sect': '§',
-        'para': '¶',
-        'middot': '·',
-        'bull': '•',
-        'hellip': '…',
-        'ndash': '–',
-        'mdash': '—',
-        'lsquo': '\u2018',
-        'rsquo': '\u2019',
-        'ldquo': '\u201C',
-        'rdquo': '\u201D',
-        'times': '×',
-        'divide': '÷',
-        'plusmn': '±',
-        'frac14': '¼',
-        'frac12': '½',
-        'frac34': '¾',
+        'nbsp': ' ', 'amp': '&', 'lt': '<', 'gt': '>', 'quot': '"', 'apos': "'",
+        'deg': '°', 'reg': '®', 'copy': '©', 'trade': '™', 'euro': '€', 'pound': '£',
+        'yen': '¥', 'cent': '¢', 'sect': '§', 'para': '¶', 'middot': '·', 'bull': '•',
+        'hellip': '…', 'ndash': '–', 'mdash': '—', 'lsquo': '\u2018', 'rsquo': '\u2019',
+        'ldquo': '\u201C', 'rdquo': '\u201D', 'times': '×', 'divide': '÷', 'plusmn': '±',
+        'frac14': '¼', 'frac12': '½', 'frac34': '¾',
       }
       return entities[entity.toLowerCase()] || match
     })
@@ -99,7 +71,6 @@ function cleanProductData(product: ProductRecord): ProductRecord {
   Object.keys(product).forEach(key => {
     const lowerKey = key.toLowerCase()
     
-    // Skip if already seen (case-insensitive) or excluded
     if (seen.has(lowerKey) || excludeFields.includes(key)) return
     seen.add(lowerKey)
     
@@ -130,7 +101,6 @@ function cleanProductData(product: ProductRecord): ProductRecord {
       Object.keys(attributes).forEach(key => {
         const lowerKey = key.toLowerCase()
         
-        // Skip if already seen (case-insensitive)
         if (seen.has(lowerKey)) return
         seen.add(lowerKey)
         
@@ -155,7 +125,7 @@ function cleanProductData(product: ProductRecord): ProductRecord {
   return cleaned
 }
 
-// Helper to truncate product data for AI processing (avoid token limits)
+// Helper to truncate product data for AI processing
 function truncateProductForAI(product: ProductRecord, maxLength: number = 8000): string {
   let result = JSON.stringify(product, null, 2)
   
@@ -215,6 +185,92 @@ function buildOrConditions(filters: any[], columns: string[]): string | null {
     .filter(Boolean)
   
   return orConditions.length > 0 ? orConditions.join(',') : null
+}
+
+// Helper to apply user filters with flexible column matching
+function applyUserFilters(dbQuery: any, filters: any, columns: string[], allProducts: any[]) {
+  if (!filters) return dbQuery
+
+  // For family filter
+  if (filters.family) {
+    const familyColumns = ['family', 'Family', 'product_family', 'productFamily'].filter(col => columns.includes(col))
+    
+    if (familyColumns.length > 0) {
+      // Use the first matching column
+      dbQuery = dbQuery.eq(familyColumns[0], filters.family)
+      console.log(`🎯 Applied family filter on column "${familyColumns[0]}": ${filters.family}`)
+    } else {
+      // Filter in memory if column not found
+      console.log(`⚠️ Family column not found in DB, will filter in memory`)
+    }
+  }
+
+  // For product type filter
+  if (filters.productType) {
+    const typeColumns = ['product_type', 'productType', 'type', 'Type', 'category', 'Category'].filter(col => columns.includes(col))
+    
+    if (typeColumns.length > 0) {
+      dbQuery = dbQuery.eq(typeColumns[0], filters.productType)
+      console.log(`🎯 Applied product type filter on column "${typeColumns[0]}": ${filters.productType}`)
+    } else {
+      console.log(`⚠️ Product type column not found in DB, will filter in memory`)
+    }
+  }
+
+  // For specification filter
+  if (filters.specification) {
+    const specColumns = ['specification', 'Specification', 'spec', 'Spec'].filter(col => columns.includes(col))
+    
+    if (specColumns.length > 0) {
+      dbQuery = dbQuery.eq(specColumns[0], filters.specification)
+      console.log(`🎯 Applied specification filter on column "${specColumns[0]}": ${filters.specification}`)
+    } else {
+      console.log(`⚠️ Specification column not found in DB, will filter in memory`)
+    }
+  }
+
+  return dbQuery
+}
+
+// Helper to filter products in memory (fallback when DB columns don't exist)
+function filterProductsInMemory(products: any[], filters: any): any[] {
+  if (!filters) return products
+
+  return products.filter(product => {
+    let matches = true
+
+    // Check family
+    if (filters.family) {
+      const familyValue = product.family || product.Family || product.product_family || product.productFamily
+      const attrFamily = product.all_attributes?.family || product.all_attributes?.Family
+      
+      if (familyValue !== filters.family && attrFamily !== filters.family) {
+        matches = false
+      }
+    }
+
+    // Check product type
+    if (filters.productType) {
+      const typeValue = product.product_type || product.productType || product.type || product.Type || product.category || product.Category
+      const attrType = product.all_attributes?.product_type || product.all_attributes?.type
+      
+      if (typeValue !== filters.productType && attrType !== filters.productType) {
+        matches = false
+      }
+    }
+
+    // Check specification
+    if (filters.specification) {
+      const specValue = product.specification || product.Specification || product.spec || product.Spec
+      const attrSpec = product.all_attributes?.specification || product.all_attributes?.spec
+      
+      if (specValue !== filters.specification && attrSpec !== filters.specification) {
+        matches = false
+      }
+    }
+
+    return matches
+  })
 }
 
 export async function POST(request: NextRequest) {
@@ -288,77 +344,44 @@ IMPORTANT NOTES:
 SEARCH STRATEGY FOR HIGH ACCURACY:
 
 1. **SINGLE PRODUCT QUERY** (e.g., "PS 870", "PR-148"):
-   - Set questionType: "list"
-   - Search broadly: %PS%870% will match "PS870", "PS-870", "PS 870", "P/S 870"
-   - Search in: sku, product_name, name, searchable_text
-   - Use "any" searchType to find ALL variants
-   - Set limit: null (to show all variants like Class A, B, C)
+ - Set questionType: "list"
+ - Search broadly: %PS%870% will match "PS870", "PS-870", "PS 870", "P/S 870"
+ - Search in: sku, product_name, name, searchable_text
+ - Use "any" searchType to find ALL variants
+ - Set limit: null (to show all variants like Class A, B, C)
 
 2. **COMPARISON QUERIES** ("difference", "compare", "vs", "versus", "between"):
-   - Set questionType: "comparison"
-   - Extract product identifiers
-   - Create filters for EACH product with wildcards
-   - Search in: sku, product_name, name, searchable_text
-   - Use "any" searchType (OR logic)
-   - Set limit: null
+ - Set questionType: "comparison"
+ - Extract product identifiers
+ - Create filters for EACH product with wildcards
+ - Search in: sku, product_name, name, searchable_text
+ - Use "any" searchType (OR logic)
+ - Set limit: null
 
 3. **ATTRIBUTE QUESTIONS** ("what is the [attribute] of [product]"):
-   - Set questionType: "specific_ai"
-   - Search broadly for product identifier
-   - Let AI extract the specific attribute from results
-   - Set limit: 5
+ - Set questionType: "specific_ai"
+ - Search broadly for product identifier
+ - Let AI extract the specific attribute from results
+ - Set limit: 5
 
 4. **EXACT SKU LOOKUP**:
-   - Use "eq" operator only if SKU format is exact (e.g., "0870A00276012PT")
-   - Otherwise use "ilike" with wildcards
+ - Use "eq" operator only if SKU format is exact (e.g., "0870A00276012PT")
+ - Otherwise use "ilike" with wildcards
 
 RESPONSE FORMAT (JSON):
 {
-  "filters": [
-    {
-      "column": "column_name",
-      "operator": "eq" | "ilike",
-      "value": "value"
-    }
-  ],
-  "searchType": "all" | "any",
-  "questionType": "list" | "specific_ai" | "comparison",
-  "attributeQuestion": "extracted question",
-  "compareProducts": ["product1", "product2"],
-  "limit": null | number
-}
-
-EXAMPLES:
-
-Query: "PS 870"
-Response: {
-  "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%PS%870%"},
-    {"column": "product_name", "operator": "ilike", "value": "%PS%870%"},
-    {"column": "name", "operator": "ilike", "value": "%PS%870%"},
-    {"column": "searchable_text", "operator": "ilike", "value": "%PS%870%"}
-  ],
-  "searchType": "any",
-  "questionType": "list",
-  "limit": null
-}
-
-Query: "what is the difference between ps 870 and ps 890"
-Response: {
-  "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%PS%870%"},
-    {"column": "product_name", "operator": "ilike", "value": "%PS%870%"},
-    {"column": "name", "operator": "ilike", "value": "%PS%870%"},
-    {"column": "searchable_text", "operator": "ilike", "value": "%PS%870%"},
-    {"column": "sku", "operator": "ilike", "value": "%PS%890%"},
-    {"column": "product_name", "operator": "ilike", "value": "%PS%890%"},
-    {"column": "name", "operator": "ilike", "value": "%PS%890%"},
-    {"column": "searchable_text", "operator": "ilike", "value": "%PS%890%"}
-  ],
-  "searchType": "any",
-  "questionType": "comparison",
-  "compareProducts": ["PS 870", "PS 890"],
-  "limit": null
+"filters": [
+  {
+    "column": "column_name",
+    "operator": "eq" | "ilike",
+    "value": "value"
+  }
+],
+"searchType": "all" | "any",
+"questionType": "list" | "specific_ai" | "comparison",
+"attributeQuestion": "extracted question",
+"compareProducts": ["product1", "product2"],
+"limit": null | number
 }
 
 CRITICAL RULES:
@@ -401,21 +424,8 @@ CRITICAL RULES:
     // Step 3: Build Supabase query
     let dbQuery: any = supabase.from('products').select('*')
 
-    // Apply user-selected filters first
-    if (filters) {
-      if (filters.family && columns.includes('family')) {
-        dbQuery = dbQuery.eq('family', filters.family)
-        console.log(`🎯 Applied family filter: ${filters.family}`)
-      }
-      if (filters.productType && columns.includes('product_type')) {
-        dbQuery = dbQuery.eq('product_type', filters.productType)
-        console.log(`🎯 Applied product type filter: ${filters.productType}`)
-      }
-      if (filters.specification && columns.includes('specification')) {
-        dbQuery = dbQuery.eq('specification', filters.specification)
-        console.log(`🎯 Applied specification filter: ${filters.specification}`)
-      }
-    }
+    // Apply user-selected filters
+    dbQuery = applyUserFilters(dbQuery, filters, columns, [])
 
     if (searchParams.filters.length > 0) {
       console.log(`🔍 Applying ${searchParams.filters.length} filters with ${searchParams.searchType} logic`)
@@ -461,7 +471,7 @@ CRITICAL RULES:
         }
       }
     } else {
-      console.log('📦 No filters - returning all products')
+      console.log('📦 No search filters - will return filtered by user selections')
     }
 
     if (searchParams.orderBy?.column && columns.includes(searchParams.orderBy.column)) {
@@ -472,7 +482,6 @@ CRITICAL RULES:
       )
     }
 
-    // Apply limit - default to 1000 for comprehensive search
     const limit = searchParams.limit !== undefined && searchParams.limit !== null 
       ? searchParams.limit 
       : 1000
@@ -490,6 +499,13 @@ CRITICAL RULES:
     }
 
     console.log(`✅ Query returned ${data?.length || 0} results`)
+
+    // Apply in-memory filtering if needed
+    if (data && data.length > 0 && filters) {
+      const beforeFilter = data.length
+      data = filterProductsInMemory(data, filters)
+      console.log(`🔄 In-memory filter: ${beforeFilter} → ${data.length} products`)
+    }
 
     // FALLBACK: If no results, try simpler search
     if ((!data || data.length === 0) && searchParams.filters.length > 0) {
@@ -520,24 +536,13 @@ CRITICAL RULES:
           .or(fallbackFilters.join(','))
           .limit(1000)
         
-        // Re-apply user filters to fallback
-        if (filters) {
-          if (filters.family && columns.includes('family')) {
-            fallbackQuery = fallbackQuery.eq('family', filters.family)
-          }
-          if (filters.productType && columns.includes('product_type')) {
-            fallbackQuery = fallbackQuery.eq('product_type', filters.productType)
-          }
-          if (filters.specification && columns.includes('specification')) {
-            fallbackQuery = fallbackQuery.eq('specification', filters.specification)
-          }
-        }
+        fallbackQuery = applyUserFilters(fallbackQuery, filters, columns, [])
         
         const fallbackResult = await fallbackQuery
         
         if (!fallbackResult.error && fallbackResult.data && fallbackResult.data.length > 0) {
           console.log(`✅ Fallback search found ${fallbackResult.data.length} results`)
-          data = fallbackResult.data
+          data = filterProductsInMemory(fallbackResult.data, filters)
         }
       }
     }
