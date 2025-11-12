@@ -16,27 +16,47 @@ export default function Home() {
   const [selectedSpecification, setSelectedSpecification] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   
-  // Available filter options (will be populated from API)
+  // Available filter options
   const [familyOptions, setFamilyOptions] = useState<string[]>([])
   const [productTypeOptions, setProductTypeOptions] = useState<string[]>([])
   const [specificationOptions, setSpecificationOptions] = useState<string[]>([])
+  const [loadingFilters, setLoadingFilters] = useState(true)
 
-  // Load filter options on mount
+  // Load filter options on mount - inline version
   useEffect(() => {
-    loadFilterOptions()
+    loadFilterOptionsInline()
   }, [])
 
-  const loadFilterOptions = async () => {
+  const loadFilterOptionsInline = async () => {
+    setLoadingFilters(true)
     try {
-      const response = await fetch('/api/filter-options')
+      // Call the smart-search API with a special flag to get filter options
+      const response = await fetch('/api/smart-search', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          query: '__GET_FILTER_OPTIONS__',
+          getFilterOptions: true
+        }),
+      })
+      
       if (response.ok) {
         const data = await response.json()
-        setFamilyOptions(data.families || [])
-        setProductTypeOptions(data.productTypes || [])
-        setSpecificationOptions(data.specifications || [])
+        if (data.filterOptions) {
+          setFamilyOptions(data.filterOptions.families || [])
+          setProductTypeOptions(data.filterOptions.productTypes || [])
+          setSpecificationOptions(data.filterOptions.specifications || [])
+          console.log('✅ Loaded filter options:', data.filterOptions)
+        }
+      } else {
+        console.error('Failed to load filter options:', response.status)
       }
     } catch (err) {
       console.error('Failed to load filter options:', err)
+    } finally {
+      setLoadingFilters(false)
     }
   }
 
@@ -116,7 +136,6 @@ export default function Home() {
     Object.entries(product).forEach(([key, value]) => {
       const lowerKey = key.toLowerCase()
       
-      // Skip if we've already seen this key (case-insensitive)
       if (seen.has(lowerKey)) return
       seen.add(lowerKey)
       
@@ -199,7 +218,6 @@ export default function Home() {
     const products = comparisonData.products
     const allKeys = getAllKeys(products)
     
-    // Categorize fields
     const priorityFields = ['sku', 'product_name', 'productname', 'name']
     const excludeFields = ['created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext']
     
@@ -236,7 +254,6 @@ export default function Home() {
                 </tr>
               </thead>
               <tbody>
-                {/* Priority Fields */}
                 {priority.map((key) => {
                   const different = isDifferent(key, products)
                   return (
@@ -264,14 +281,12 @@ export default function Home() {
                   )
                 })}
 
-                {/* Section Header */}
                 <tr className="bg-gray-100">
                   <td colSpan={products.length + 1} className="px-6 py-3 text-xs font-bold uppercase tracking-wide" style={{ color: '#0078a9' }}>
                     Technical Specifications
                   </td>
                 </tr>
 
-                {/* Technical Fields */}
                 {technical.map((key) => {
                   const different = isDifferent(key, products)
                   return (
@@ -365,7 +380,7 @@ export default function Home() {
             <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold" style={{ color: '#0078a9' }}>
-                  Filter Options
+                  Filter Options {loadingFilters && <span className="text-sm font-normal text-gray-500">(Loading...)</span>}
                 </h3>
                 {hasActiveFilters && (
                   <button
@@ -382,12 +397,13 @@ export default function Home() {
                 {/* Family Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Family
+                    Family ({familyOptions.length} options)
                   </label>
                   <select
                     value={selectedFamily}
                     onChange={(e) => setSelectedFamily(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
+                    disabled={loadingFilters}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent disabled:bg-gray-100"
                   >
                     <option value="">All Families</option>
                     {familyOptions.map((option) => (
@@ -401,12 +417,13 @@ export default function Home() {
                 {/* Product Type Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Product Type
+                    Product Type ({productTypeOptions.length} options)
                   </label>
                   <select
                     value={selectedProductType}
                     onChange={(e) => setSelectedProductType(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
+                    disabled={loadingFilters}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent disabled:bg-gray-100"
                   >
                     <option value="">All Types</option>
                     {productTypeOptions.map((option) => (
@@ -420,12 +437,13 @@ export default function Home() {
                 {/* Specification Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Specification
+                    Specification ({specificationOptions.length} options)
                   </label>
                   <select
                     value={selectedSpecification}
                     onChange={(e) => setSelectedSpecification(e.target.value)}
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
+                    disabled={loadingFilters}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent disabled:bg-gray-100"
                   >
                     <option value="">All Specifications</option>
                     {specificationOptions.map((option) => (
@@ -523,7 +541,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* Regular List View (only show if not comparison) */}
+      {/* Regular List View */}
       {results.length > 0 && !comparisonData && (
         <div>
           <div className="mb-6 flex items-center justify-between">
@@ -541,7 +559,6 @@ export default function Home() {
                   key={index}
                   className="bg-white border border-gray-200 rounded-lg p-6 hover:shadow-lg transition-shadow"
                 >
-                  {/* Priority Fields (SKU, Name, Description) */}
                   {Object.keys(priority).length > 0 && (
                     <div className="mb-4 pb-4 border-b border-gray-200">
                       <div className="space-y-3">
@@ -562,7 +579,6 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Technical Specifications */}
                   {Object.keys(other).length > 0 && (
                     <div className="mb-4">
                       <h3 
@@ -586,7 +602,6 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Searchable Text Block */}
                   {Object.keys(searchable).length > 0 && (
                     <div className="mb-4 pb-4 border-b border-gray-200">
                       {Object.entries(searchable).map(([key, value]) => (
@@ -605,7 +620,6 @@ export default function Home() {
                     </div>
                   )}
 
-                  {/* Footer (Created At / Updated At) */}
                   {Object.keys(footer).length > 0 && (
                     <div className="pt-4 border-t border-gray-200">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-gray-500">

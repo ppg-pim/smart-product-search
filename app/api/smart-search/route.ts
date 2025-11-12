@@ -275,8 +275,102 @@ function filterProductsInMemory(products: any[], filters: any): any[] {
 
 export async function POST(request: NextRequest) {
   try {
-    const { query, filters } = await request.json()
+    const body = await request.json()
+    const { query, filters, getFilterOptions } = body
 
+    // Handle filter options request
+    if (query === '__GET_FILTER_OPTIONS__' || getFilterOptions === true) {
+      console.log('📋 Loading filter options...')
+      
+      try {
+        const { data: products, error } = await supabase
+          .from('products')
+          .select('*')
+          .limit(10000)
+
+        if (error) {
+          throw new Error(`Database error: ${error.message}`)
+        }
+
+        const families = new Set<string>()
+        const productTypes = new Set<string>()
+        const specifications = new Set<string>()
+
+        products?.forEach((product: any) => {
+          // Extract family
+          const familyValue = product.family || product.Family || product.product_family || product.productFamily
+          if (familyValue && String(familyValue).trim()) {
+            families.add(String(familyValue).trim())
+          }
+
+          // Extract product type
+          const typeValue = product.product_type || product.productType || product.type || product.Type || product.category || product.Category
+          if (typeValue && String(typeValue).trim()) {
+            productTypes.add(String(typeValue).trim())
+          }
+
+          // Extract specification
+          const specValue = product.specification || product.Specification || product.spec || product.Spec
+          if (specValue && String(specValue).trim()) {
+            specifications.add(String(specValue).trim())
+          }
+
+          // Also check in all_attributes
+          if (product.all_attributes) {
+            try {
+              let attributes: any = typeof product.all_attributes === 'string' 
+                ? JSON.parse(product.all_attributes) 
+                : product.all_attributes
+
+              const attrFamily = attributes.family || attributes.Family || attributes.product_family || attributes.productFamily
+              if (attrFamily && String(attrFamily).trim()) {
+                families.add(String(attrFamily).trim())
+              }
+
+              const attrType = attributes.product_type || attributes.productType || attributes.type || attributes.Type
+              if (attrType && String(attrType).trim()) {
+                productTypes.add(String(attrType).trim())
+              }
+
+              const attrSpec = attributes.specification || attributes.Specification || attributes.spec || attributes.Spec
+              if (attrSpec && String(attrSpec).trim()) {
+                specifications.add(String(attrSpec).trim())
+              }
+            } catch (e) {
+              // Ignore parsing errors
+            }
+          }
+        })
+
+        const familiesArray = Array.from(families).sort()
+        const productTypesArray = Array.from(productTypes).sort()
+        const specificationsArray = Array.from(specifications).sort()
+
+        console.log(`✅ Filter options loaded: ${familiesArray.length} families, ${productTypesArray.length} types, ${specificationsArray.length} specs`)
+
+        return NextResponse.json({
+          success: true,
+          filterOptions: {
+            families: familiesArray,
+            productTypes: productTypesArray,
+            specifications: specificationsArray
+          }
+        })
+      } catch (error: any) {
+        console.error('❌ Error loading filter options:', error)
+        return NextResponse.json({
+          success: false,
+          filterOptions: { 
+            families: [], 
+            productTypes: [], 
+            specifications: [] 
+          },
+          error: error.message
+        })
+      }
+    }
+
+    // Regular search flow continues below
     if (!query) {
       return NextResponse.json(
         { error: 'Query is required' },
