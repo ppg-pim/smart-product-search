@@ -330,7 +330,7 @@ export default function Home() {
     <main className="min-h-screen p-8 max-w-7xl mx-auto bg-gray-50">
       <div className="bg-white rounded-lg shadow-sm p-8 mb-8">
         <h1 className="text-4xl font-bold mb-2 text-center" style={{ color: '#0078a9' }}>
-          Smart Product Search
+          Sealants - Smart Product Search
         </h1>
         <p className="text-center text-gray-600 mb-8">
           Search products using natural language
