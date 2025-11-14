@@ -576,13 +576,12 @@ CRITICAL RULES:
       )
     }
 
-    const limit = searchParams.limit !== undefined && searchParams.limit !== null 
-      ? searchParams.limit 
-      : 1000
-    
-    if (limit > 0) {
-      dbQuery = dbQuery.limit(limit)
-      console.log(`🔢 Applying limit: ${limit}`)
+    // Only apply limit if explicitly set by GPT (not null/undefined)
+    if (searchParams.limit !== undefined && searchParams.limit !== null && searchParams.limit > 0) {
+      dbQuery = dbQuery.limit(searchParams.limit)
+      console.log(`🔢 Applying limit: ${searchParams.limit}`)
+    } else {
+      console.log(`🔢 No limit applied - fetching all matching results`)
     }
 
     let { data, error } = await dbQuery
@@ -628,7 +627,6 @@ CRITICAL RULES:
           .from('products')
           .select('*')
           .or(fallbackFilters.join(','))
-          .limit(1000)
         
         fallbackQuery = applyUserFilters(fallbackQuery, filters, columns, [])
         
