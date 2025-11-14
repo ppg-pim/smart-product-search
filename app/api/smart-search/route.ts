@@ -774,15 +774,20 @@ Response:
     if (searchParams.questionType === "analytical" && data && data.length > 0 && searchParams.searchKeywords) {
       console.log(`🎯 Ranking ${data.length} products by relevance...`)
       
-      const scoredProducts = data.map((product: ProductRecord) => ({
+      interface ScoredProduct {
+        product: ProductRecord;
+        score: number;
+      }
+      
+      const scoredProducts: ScoredProduct[] = data.map((product: ProductRecord) => ({
         product,
         score: scoreProductRelevance(product, searchParams.searchKeywords)
       }))
       
-      scoredProducts.sort((a, b) => b.score - a.score)
+      scoredProducts.sort((a: ScoredProduct, b: ScoredProduct) => b.score - a.score)
       
       // Take top 50 most relevant products
-      data = scoredProducts.slice(0, 50).map(item => item.product)
+      data = scoredProducts.slice(0, 50).map((item: ScoredProduct) => item.product)
       
       console.log(`✅ Selected top ${data.length} most relevant products`)
     }
