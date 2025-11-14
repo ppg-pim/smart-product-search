@@ -774,7 +774,7 @@ Response:
     if (searchParams.questionType === "analytical" && data && data.length > 0 && searchParams.searchKeywords) {
       console.log(`🎯 Ranking ${data.length} products by relevance...`)
       
-      const scoredProducts = data.map(product => ({
+      const scoredProducts = data.map((product: ProductRecord) => ({
         product,
         score: scoreProductRelevance(product, searchParams.searchKeywords)
       }))
