@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import OpenAI from 'openai'
 
+// Add timeout configuration
+export const maxDuration = 60
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
