@@ -9,19 +9,21 @@ export default function Home() {
   const [error, setError] = useState('')
   const [specificAnswer, setSpecificAnswer] = useState<any>(null)
   const [comparisonData, setComparisonData] = useState<any>(null)
-  const [analyticalData, setAnalyticalData] = useState<any>(null)
-  const [hasSearched, setHasSearched] = useState(false)
+  const [analyticalData, setAnalyticalData] = useState<any>(null) // NEW
   
+  // Filter states
   const [selectedFamily, setSelectedFamily] = useState('')
   const [selectedProductType, setSelectedProductType] = useState('')
   const [selectedSpecification, setSelectedSpecification] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   
+  // Available filter options
   const [familyOptions, setFamilyOptions] = useState<string[]>([])
   const [productTypeOptions, setProductTypeOptions] = useState<string[]>([])
   const [specificationOptions, setSpecificationOptions] = useState<string[]>([])
   const [loadingFilters, setLoadingFilters] = useState(true)
 
+  // Load filter options on mount - inline version
   useEffect(() => {
     loadFilterOptionsInline()
   }, [])
@@ -29,6 +31,7 @@ export default function Home() {
   const loadFilterOptionsInline = async () => {
     setLoadingFilters(true)
     try {
+      // Call the smart-search API with a special flag to get filter options
       const response = await fetch('/api/smart-search', {
         method: 'POST',
         headers: {
@@ -65,8 +68,7 @@ export default function Home() {
     setResults([])
     setSpecificAnswer(null)
     setComparisonData(null)
-    setAnalyticalData(null)
-    setHasSearched(true)
+    setAnalyticalData(null) // NEW
 
     try {
       const response = await fetch('/api/smart-search', {
@@ -90,20 +92,24 @@ export default function Home() {
         throw new Error(data.error || 'Search failed')
       }
 
+      // Handle analytical responses (NEW!)
       if (data.questionType === 'analytical') {
         setAnalyticalData(data)
         setResults(data.results || [])
       }
+      // Handle comparison responses
       else if (data.questionType === 'comparison') {
         setComparisonData(data)
         setResults(data.products || [])
       }
+      // Handle specific question responses
       else if (data.questionType === 'specific') {
         setSpecificAnswer(data)
         if (data.fullProduct) {
           setResults([data.fullProduct])
         }
       } 
+      // Handle list responses
       else {
         setResults(data.results || [])
       }
@@ -122,6 +128,7 @@ export default function Home() {
 
   const hasActiveFilters = selectedFamily || selectedProductType || selectedSpecification
 
+  // Check if value is empty
   const isEmpty = (value: any): boolean => {
     if (value === null || value === undefined) return true
     if (typeof value === 'string' && value.trim() === '') return true
@@ -129,6 +136,7 @@ export default function Home() {
     return false
   }
 
+  // Group attributes by category for better display
   const groupAttributes = (product: any) => {
     const headerFields = ['sku', 'name', 'product_name', 'productname', 'description', 'product_description']
     const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext', 'searchable']
@@ -140,6 +148,7 @@ export default function Home() {
     Object.entries(product).forEach(([key, value]) => {
       const lowerKey = key.toLowerCase()
       
+      // Skip if already seen, excluded, or empty
       if (seen.has(lowerKey) || excludeFields.includes(lowerKey) || isEmpty(value)) return
       seen.add(lowerKey)
       
@@ -153,6 +162,7 @@ export default function Home() {
     return { header, other }
   }
 
+  // Format field name for display
   const formatFieldName = (key: string): string => {
     const fieldMappings: { [key: string]: string } = {
       'sku': 'SKU',
@@ -171,6 +181,7 @@ export default function Home() {
       .replace(/\b\w/g, (char) => char.toUpperCase())
   }
 
+  // Format date values
   const formatValue = (key: string, value: any): string => {
     const lowerKey = key.toLowerCase()
     if ((lowerKey.includes('created') || lowerKey.includes('updated')) && 
@@ -184,6 +195,7 @@ export default function Home() {
     return String(value)
   }
 
+  // Get all unique keys from products for comparison
   const getAllKeys = (products: any[]) => {
     const allKeys = new Set<string>()
     const seenLowerKeys = new Set<string>()
@@ -201,11 +213,13 @@ export default function Home() {
     return Array.from(allKeys)
   }
 
+  // Check if values are different across products
   const isDifferent = (key: string, products: any[]) => {
     const values = products.map(p => p[key])
     return new Set(values).size > 1
   }
 
+  // NEW: Render analytical summary
   const renderAnalyticalSummary = () => {
     if (!analyticalData) return null
 
@@ -272,6 +286,7 @@ export default function Home() {
     )
   }
 
+  // Render comparison table
   const renderComparison = () => {
     if (!comparisonData || !comparisonData.products || comparisonData.products.length < 2) {
       return null
@@ -437,6 +452,7 @@ export default function Home() {
             </button>
           </div>
 
+          {/* Filter Panel */}
           {showFilters && (
             <div className="border border-gray-200 rounded-lg p-6 bg-gray-50">
               <div className="flex items-center justify-between mb-4">
@@ -455,6 +471,7 @@ export default function Home() {
               </div>
               
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {/* Family Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Family ({familyOptions.length} options)
@@ -474,6 +491,7 @@ export default function Home() {
                   </select>
                 </div>
 
+                {/* Product Type Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Product Type ({productTypeOptions.length} options)
@@ -493,6 +511,7 @@ export default function Home() {
                   </select>
                 </div>
 
+                {/* Specification Filter */}
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     Specification ({specificationOptions.length} options)
@@ -565,10 +584,13 @@ export default function Home() {
         </div>
       )}
 
+      {/* NEW: Analytical Summary View */}
       {analyticalData && renderAnalyticalSummary()}
 
+      {/* Comparison View */}
       {comparisonData && renderComparison()}
 
+      {/* Specific Answer Display */}
       {specificAnswer && (
         <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg">
           <div className="flex items-start">
@@ -599,6 +621,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* Regular List View */}
       {results.length > 0 && !comparisonData && (
         <div id="product-references">
           <div className="mb-6 flex items-center justify-between">
@@ -621,11 +644,13 @@ export default function Home() {
                   key={index}
                   className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-lg transition-shadow"
                 >
+                  {/* Card Header with SKU, Product Name, Description */}
                   {Object.keys(header).length > 0 && (
                     <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2 border-blue-200 p-6">
                       {Object.entries(header).map(([key, value]) => {
                         const lowerKey = key.toLowerCase()
                         
+                        // SKU - Large and prominent
                         if (lowerKey === 'sku') {
                           return (
                             <div key={key} className="mb-3">
@@ -637,6 +662,7 @@ export default function Home() {
                           )
                         }
                         
+                        // Product Name
                         if (lowerKey === 'name' || lowerKey === 'product_name' || lowerKey === 'productname') {
                           return (
                             <div key={key} className="mb-3">
@@ -648,6 +674,7 @@ export default function Home() {
                           )
                         }
                         
+                        // Description
                         if (lowerKey === 'description' || lowerKey === 'product_description') {
                           return (
                             <div key={key} className="mt-3">
@@ -664,6 +691,7 @@ export default function Home() {
                     </div>
                   )}
 
+                  {/* Technical Specifications */}
                   {Object.keys(other).length > 0 && (
                     <div className="p-6">
                       <h4 className="text-lg font-semibold mb-4" style={{ color: '#0078a9' }}>
@@ -687,6 +715,7 @@ export default function Home() {
                     </div>
                   )}
 
+                  {/* Empty state if no data */}
                   {Object.keys(header).length === 0 && Object.keys(other).length === 0 && (
                     <div className="p-6 text-center text-gray-500">
                       No displayable data available for this product
@@ -699,19 +728,8 @@ export default function Home() {
         </div>
       )}
 
-      {loading && (
-        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#0078a9]"></div>
-          <p className="mt-4 text-gray-600">Searching products...</p>
-          {query && (
-            <p className="mt-2 text-sm text-gray-500">
-              You are searching: <span className="font-semibold" style={{ color: '#0078a9' }}>{query}</span>
-            </p>
-          )}
-        </div>
-      )}
-
-      {!loading && hasSearched && !error && results.length === 0 && !specificAnswer && !comparisonData && !analyticalData && (
+      {/* Empty state when no results */}
+      {!loading && !error && results.length === 0 && !specificAnswer && !comparisonData && !analyticalData && query && (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
           <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -720,6 +738,14 @@ export default function Home() {
           <p className="mt-2 text-sm text-gray-500">
             Try adjusting your search query or filters
           </p>
+        </div>
+      )}
+
+      {/* Loading state */}
+      {loading && (
+        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#0078a9]"></div>
+          <p className="mt-4 text-gray-600">Searching products...</p>
         </div>
       )}
     </main>
