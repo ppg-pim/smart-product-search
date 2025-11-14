@@ -125,12 +125,39 @@ function cleanProductData(product: ProductRecord): ProductRecord {
   return cleaned
 }
 
+// NEW: Score and rank products by relevance
+function scoreProductRelevance(product: ProductRecord, keywords: string[]): number {
+  let score = 0
+  const productText = JSON.stringify(product).toLowerCase()
+  
+  keywords.forEach(keyword => {
+    const lowerKeyword = keyword.toLowerCase()
+    const keywordCount = (productText.match(new RegExp(lowerKeyword, 'g')) || []).length
+    
+    // Higher weight for keywords in important fields
+    const sku = (product.sku || '').toLowerCase()
+    const name = (product.product_name || product.name || '').toLowerCase()
+    const description = (product.description || '').toLowerCase()
+    const application = (product.application || product.Application || '').toLowerCase()
+    
+    if (sku.includes(lowerKeyword)) score += 50
+    if (name.includes(lowerKeyword)) score += 30
+    if (application.includes(lowerKeyword)) score += 20
+    if (description.includes(lowerKeyword)) score += 10
+    
+    // General occurrence bonus
+    score += keywordCount * 2
+  })
+  
+  return score
+}
+
 // Helper to truncate product data for AI processing
-function truncateProductForAI(product: ProductRecord, maxLength: number = 8000): string {
+function truncateProductForAI(product: ProductRecord, maxLength: number = 3000): string {
   let result = JSON.stringify(product, null, 2)
   
   if (result.length > maxLength) {
-    const priorityFields = ['sku', 'product_name', 'name', 'description', 'color', 'colour']
+    const priorityFields = ['sku', 'product_name', 'name', 'description', 'color', 'colour', 'family', 'specification', 'product_type', 'application', 'use', 'features', 'benefits', 'temperature', 'resistance']
     const truncated: ProductRecord = {}
     
     priorityFields.forEach(field => {
@@ -196,11 +223,9 @@ function applyUserFilters(dbQuery: any, filters: any, columns: string[], allProd
     const familyColumns = ['family', 'Family', 'product_family', 'productFamily'].filter(col => columns.includes(col))
     
     if (familyColumns.length > 0) {
-      // Use the first matching column
       dbQuery = dbQuery.eq(familyColumns[0], filters.family)
       console.log(`🎯 Applied family filter on column "${familyColumns[0]}": ${filters.family}`)
     } else {
-      // Filter in memory if column not found
       console.log(`⚠️ Family column not found in DB, will filter in memory`)
     }
   }
@@ -271,6 +296,87 @@ function filterProductsInMemory(products: any[], filters: any): any[] {
 
     return matches
   })
+}
+
+// NEW: Generate AI summary from multiple products
+async function generateAISummary(query: string, products: ProductRecord[]): Promise<string> {
+  try {
+    // Limit to top 50 products and use aggressive truncation
+    const productsData = products.slice(0, 25).map(p => truncateProductForAI(p, 2000))
+    const combinedData = productsData.join('\n\n---\n\n')
+    
+    // Safety check for token limits
+    const estimatedTokens = combinedData.length / 4 // rough estimate
+    if (estimatedTokens > 20000) {
+      console.warn(`⚠️ Data too large (${estimatedTokens} tokens), reducing to top 15 products`)
+      const reducedData = products.slice(0, 15).map(p => truncateProductForAI(p, 1500))
+      return await generateAISummary(query, products.slice(0, 15))
+    }
+    
+    console.log(`🤖 Generating AI summary from ${products.length} products (${combinedData.length} chars)`)
+    
+    const summaryCompletion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert aerospace product consultant specializing in sealants and related products. 
+
+Your task is to provide comprehensive, insightful answers based on the product data provided.
+
+GUIDELINES:
+- Provide a clear, well-structured answer that directly addresses the user's question
+- Use specific product details and technical specifications as evidence
+- Explain WHY certain products are used (applications, benefits, specifications)
+- When asked about "best" products, analyze ALL products and recommend based on:
+  * Specific application requirements (e.g., firewall, fuel tank, pressurized cabin)
+  * Technical specifications that match the use case
+  * Industry standards and certifications
+  * Performance characteristics
+- Compare products when relevant and explain trade-offs
+- Provide recommendations based on use cases
+- Use bullet points for clarity when listing features or benefits
+- Include technical specifications that support your explanation
+- Be conversational but professional
+- If asking about a product family, discuss the range of products and their differences
+- Always cite specific product names/SKUs when making claims
+- If multiple products are suitable, list them ALL with their specific advantages
+
+FORMAT YOUR RESPONSE:
+1. **Direct Answer** - Start with a clear answer to the question
+2. **Recommended Products** - List specific products with SKUs
+3. **Key Benefits/Features** - Explain why each product is suitable
+4. **Technical Details** - Include relevant specifications
+5. **Applications** - Explain where/how it's used
+6. **Comparison** - If multiple options, explain differences and when to use each
+
+PRODUCT DATA (${products.length} products analyzed):
+${combinedData}`
+        },
+        {
+          role: 'user',
+          content: query
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 2000
+    })
+    
+    let summary = summaryCompletion.choices[0].message.content || 'Unable to generate summary'
+    summary = stripHtml(summary)
+    
+    return summary
+  } catch (error: any) {
+    console.error('❌ AI summary generation error:', error.message)
+    
+    // If token limit error, try with fewer products
+    if (error.message?.includes('tokens') && products.length > 10) {
+      console.log('🔄 Retrying with fewer products...')
+      return await generateAISummary(query, products.slice(0, 10))
+    }
+    
+    return 'Unable to generate AI summary at this time. Please review the product details below.'
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -430,60 +536,120 @@ ${filters ? JSON.stringify(filters, null, 2) : 'None'}
 IMPORTANT NOTES:
 - The "searchable_text" column contains ALL product information (flattened from all_attributes)
 - Product identifiers can be in "sku", "product_name", or "name" columns
-- Use BROAD searches with "ilike" and wildcards for maximum accuracy
+- Use SPECIFIC searches for better performance
 - Products may have variants (e.g., "P/S 870 Class A", "P/S 870 Class B", "P/S 870 Class C")
 - When user asks for a product family (e.g., "PS 870"), show ALL variants
 - If user has applied filters (family, productType, specification), incorporate them into the search
 
-SEARCH STRATEGY FOR HIGH ACCURACY:
+QUESTION TYPE DETECTION:
 
-1. **SINGLE PRODUCT QUERY** (e.g., "PS 870", "PR-148"):
- - Set questionType: "list"
- - Search broadly: %PS%870% will match "PS870", "PS-870", "PS 870", "P/S 870"
- - Search in: sku, product_name, name, searchable_text
- - Use "any" searchType to find ALL variants
- - Set limit: null (to show all variants like Class A, B, C)
+1. **ANALYTICAL QUESTIONS** (why, how, what makes, explain, tell me about, advantages, benefits, uses, best, recommend, which product):
+   - Set questionType: "analytical"
+   - These require AI-generated summaries based on product data
+   - Examples: "Why use Korotherm?", "What are the benefits of PS 870?", "Which product is best for firewall?"
+   - **CRITICAL: For application-based queries, use TARGETED search:**
+     - Primary keyword: Main application term (e.g., "firewall")
+     - Search in: sku, product_name, name, description, application fields
+     - Use "any" searchType (OR logic)
+     - Set limit: 100 (manageable for AI analysis)
+   - For specific product family queries (e.g., "tell me about PS 870"), search for that product name
 
-2. **COMPARISON QUERIES** ("difference", "compare", "vs", "versus", "between"):
- - Set questionType: "comparison"
- - Extract product identifiers
- - Create filters for EACH product with wildcards
- - Search in: sku, product_name, name, searchable_text
- - Use "any" searchType (OR logic)
- - Set limit: null
+2. **SINGLE PRODUCT QUERY** (e.g., "PS 870", "PR-148"):
+   - Set questionType: "list"
+   - Search broadly: %PS%870% will match "PS870", "PS-870", "PS 870", "P/S 870"
+   - Search in: sku, product_name, name, searchable_text
+   - Use "any" searchType to find ALL variants
+   - Set limit: null (to show all variants like Class A, B, C)
 
-3. **ATTRIBUTE QUESTIONS** ("what is the [attribute] of [product]"):
- - Set questionType: "specific_ai"
- - Search broadly for product identifier
- - Let AI extract the specific attribute from results
- - Set limit: 5
+3. **COMPARISON QUERIES** ("difference", "compare", "vs", "versus", "between"):
+   - Set questionType: "comparison"
+   - Extract product identifiers
+   - Create filters for EACH product with wildcards
+   - Search in: sku, product_name, name, searchable_text
+   - Use "any" searchType (OR logic)
+   - Set limit: null
 
-4. **EXACT SKU LOOKUP**:
- - Use "eq" operator only if SKU format is exact (e.g., "0870A00276012PT")
- - Otherwise use "ilike" with wildcards
+4. **ATTRIBUTE QUESTIONS** ("what is the [attribute] of [product]"):
+   - Set questionType: "specific_ai"
+   - Search broadly for product identifier
+   - Let AI extract the specific attribute from results
+   - Set limit: 5
+
+5. **EXACT SKU LOOKUP**:
+   - Use "eq" operator only if SKU format is exact (e.g., "0870A00276012PT")
+   - Otherwise use "ilike" with wildcards
 
 RESPONSE FORMAT (JSON):
 {
-"filters": [
-  {
-    "column": "column_name",
-    "operator": "eq" | "ilike",
-    "value": "value"
-  }
-],
-"searchType": "all" | "any",
-"questionType": "list" | "specific_ai" | "comparison",
-"attributeQuestion": "extracted question",
-"compareProducts": ["product1", "product2"],
-"limit": null | number
+  "filters": [
+    {
+      "column": "column_name",
+      "operator": "eq" | "ilike",
+      "value": "value"
+    }
+  ],
+  "searchType": "all" | "any",
+  "questionType": "list" | "specific_ai" | "comparison" | "analytical",
+  "attributeQuestion": "extracted question",
+  "compareProducts": ["product1", "product2"],
+  "limit": null | number,
+  "searchKeywords": ["keyword1", "keyword2"]
 }
 
-CRITICAL RULES:
-- For single product queries, use "list" questionType and limit: null to show ALL variants
-- For comparisons, ALWAYS use "any" searchType and limit: null
-- Use wildcards liberally: %PS%870% matches "PS870", "PS-870", "PS 870", "P/S 870", "APS870B"
-- Search multiple columns (sku, product_name, name, searchable_text) for better matches
-- When user asks for product family (e.g., "PS 870"), return ALL related products (Class A, B, C, etc.)`
+CRITICAL RULES FOR ANALYTICAL QUERIES:
+- For "best for [application]" queries, extract PRIMARY keyword (e.g., "firewall")
+- Search in sku, product_name, name, description, application columns
+- Set limit: 100 (to avoid database timeout and token limits)
+- Use "any" searchType for OR logic
+- Include searchKeywords array with extracted application terms
+- Be SPECIFIC - don't use overly broad terms like "high temperature" alone
+
+EXAMPLES:
+
+Query: "Which product is best for firewall sealant?"
+Response:
+{
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%firewall%"},
+    {"column": "product_name", "operator": "ilike", "value": "%firewall%"},
+    {"column": "name", "operator": "ilike", "value": "%firewall%"},
+    {"column": "description", "operator": "ilike", "value": "%firewall%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%firewall%"}
+  ],
+  "searchType": "any",
+  "questionType": "analytical",
+  "limit": 100,
+  "searchKeywords": ["firewall"]
+}
+
+Query: "Tell me about PS 870"
+Response:
+{
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%PS%870%"},
+    {"column": "product_name", "operator": "ilike", "value": "%PS%870%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%PS%870%"}
+  ],
+  "searchType": "any",
+  "questionType": "analytical",
+  "limit": 50,
+  "searchKeywords": ["PS 870"]
+}
+
+Query: "show me a product for firewall"
+Response:
+{
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%firewall%"},
+    {"column": "product_name", "operator": "ilike", "value": "%firewall%"},
+    {"column": "description", "operator": "ilike", "value": "%firewall%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%firewall%"}
+  ],
+  "searchType": "any",
+  "questionType": "analytical",
+  "limit": 100,
+  "searchKeywords": ["firewall"]
+}`
         },
         {
           role: 'user',
@@ -529,7 +695,7 @@ CRITICAL RULES:
         
         if (orConditionString) {
           dbQuery = dbQuery.or(orConditionString)
-          console.log('✅ OR conditions applied')
+          console.log('✅ OR conditions applied:', orConditionString)
         }
       } else {
         const validFilters = searchParams.filters.filter((filter: any) => 
@@ -576,8 +742,12 @@ CRITICAL RULES:
       )
     }
 
-    // Only apply limit if explicitly set by GPT (not null/undefined)
-    if (searchParams.limit !== undefined && searchParams.limit !== null && searchParams.limit > 0) {
+    // Apply smart limits based on question type
+    if (searchParams.questionType === "analytical") {
+      const limit = searchParams.limit || 100
+      dbQuery = dbQuery.limit(limit)
+      console.log(`🔢 Analytical query - limiting to ${limit} products for performance`)
+    } else if (searchParams.limit !== undefined && searchParams.limit !== null && searchParams.limit > 0) {
       dbQuery = dbQuery.limit(searchParams.limit)
       console.log(`🔢 Applying limit: ${searchParams.limit}`)
     } else {
@@ -600,11 +770,30 @@ CRITICAL RULES:
       console.log(`🔄 In-memory filter: ${beforeFilter} → ${data.length} products`)
     }
 
+    // NEW: For analytical queries, rank by relevance and take top results
+    if (searchParams.questionType === "analytical" && data && data.length > 0 && searchParams.searchKeywords) {
+      console.log(`🎯 Ranking ${data.length} products by relevance...`)
+      
+      const scoredProducts = data.map(product => ({
+        product,
+        score: scoreProductRelevance(product, searchParams.searchKeywords)
+      }))
+      
+      scoredProducts.sort((a, b) => b.score - a.score)
+      
+      // Take top 50 most relevant products
+      data = scoredProducts.slice(0, 50).map(item => item.product)
+      
+      console.log(`✅ Selected top ${data.length} most relevant products`)
+    }
+
     // FALLBACK: If no results, try simpler search
     if ((!data || data.length === 0) && searchParams.filters.length > 0) {
       console.log('🔄 No results found, trying fallback search...')
       
       const searchTerms = new Set<string>()
+      
+      // Extract search terms from filters
       searchParams.filters.forEach((filter: any) => {
         if (filter.value) {
           const cleanTerm = filter.value.replace(/%/g, '').replace(/[\s-]/g, '')
@@ -613,6 +802,15 @@ CRITICAL RULES:
           }
         }
       })
+      
+      // Also use searchKeywords if provided
+      if (searchParams.searchKeywords && Array.isArray(searchParams.searchKeywords)) {
+        searchParams.searchKeywords.forEach((keyword: string) => {
+          if (keyword && keyword.length > 2) {
+            searchTerms.add(keyword)
+          }
+        })
+      }
       
       if (searchTerms.size > 0) {
         const fallbackFilters: string[] = []
@@ -627,6 +825,7 @@ CRITICAL RULES:
           .from('products')
           .select('*')
           .or(fallbackFilters.join(','))
+          .limit(100)
         
         fallbackQuery = applyUserFilters(fallbackQuery, filters, columns, [])
         
@@ -651,7 +850,23 @@ CRITICAL RULES:
 
     const cleanedResults = data.map((product: ProductRecord) => cleanProductData(product))
 
-    // Step 4: Handle comparison questions
+    // Step 4: Handle ANALYTICAL questions
+    if (searchParams.questionType === "analytical") {
+      console.log(`🤖 Analytical mode - generating AI summary from ${cleanedResults.length} products`)
+      
+      const aiSummary = await generateAISummary(query, cleanedResults)
+      
+      return NextResponse.json({
+        success: true,
+        questionType: "analytical",
+        summary: aiSummary,
+        results: cleanedResults,
+        count: cleanedResults.length,
+        message: `Analysis based on ${cleanedResults.length} product(s)`
+      })
+    }
+
+    // Step 5: Handle comparison questions
     if (searchParams.questionType === "comparison") {
       console.log(`🔄 Comparison mode - found ${cleanedResults.length} products`)
       
@@ -694,7 +909,7 @@ CRITICAL RULES:
       }
     }
 
-    // Step 5: Handle AI-powered specific questions
+    // Step 6: Handle AI-powered specific questions
     if (searchParams.questionType === "specific_ai" && cleanedResults.length > 0) {
       const product = cleanedResults[0]
       const attributeQuestion = searchParams.attributeQuestion || query
