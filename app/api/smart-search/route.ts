@@ -332,10 +332,10 @@ GUIDELINES:
 - Use specific product details and technical specifications as evidence
 - Explain WHY certain products are used (applications, benefits, specifications)
 - When asked about "best" products, analyze ALL products and recommend based on:
-  * Specific application requirements (e.g., firewall, fuel tank, pressurized cabin)
-  * Technical specifications that match the use case
-  * Industry standards and certifications
-  * Performance characteristics
+* Specific application requirements (e.g., firewall, fuel tank, pressurized cabin)
+* Technical specifications that match the use case
+* Industry standards and certifications
+* Performance characteristics
 - Compare products when relevant and explain trade-offs
 - Provide recommendations based on use cases
 - Use bullet points for clarity when listing features or benefits
@@ -380,6 +380,94 @@ ${combinedData}`
     
     return 'Unable to generate AI summary at this time. Please review the product details below.'
   }
+}
+
+// NEW: Generate comparison analysis for ALL comparisons
+async function generateComparisonAnalysis(query: string, products: ProductRecord[], comparisonType: string): Promise<string> {
+  try {
+    const productsData = products.map(p => truncateProductForAI(p, 3000))
+    const combinedData = productsData.join('\n\n---\n\n')
+    
+    console.log(`🤖 Generating comparison analysis (type: ${comparisonType})`)
+    
+    const comparisonCompletion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert aerospace product consultant. You are comparing ${products.length} products.
+
+COMPARISON TYPE: ${comparisonType}
+
+Your task is to provide a detailed comparison analysis highlighting:
+1. **Key Differences** - What makes each product unique
+2. **Similarities** - What they have in common
+3. **Use Cases** - When to use each product
+4. **Technical Distinctions** - Important specification differences
+5. **Recommendations** - Which product is best for specific applications
+
+GUIDELINES:
+- Be specific and cite actual product names/SKUs
+- Highlight the most important differences first
+- Explain WHY the differences matter
+- Use bullet points for clarity
+- Be concise but comprehensive
+- Focus on practical implications for users
+
+PRODUCTS TO COMPARE:
+${combinedData}`
+        },
+        {
+          role: 'user',
+          content: query
+        }
+      ],
+      temperature: 0.3,
+      max_tokens: 1500
+    })
+    
+    let analysis = comparisonCompletion.choices[0].message.content || 'Unable to generate comparison analysis'
+    analysis = stripHtml(analysis)
+    
+    return analysis
+  } catch (error: any) {
+    console.error('❌ Comparison analysis error:', error.message)
+    return 'Unable to generate comparison analysis at this time. Please review the comparison table below.'
+  }
+}
+
+// SIMPLIFIED: Detect comparison type based on products
+function detectComparisonType(products: ProductRecord[]): string {
+  if (products.length < 2) return 'general'
+  
+  console.log(`🔍 Detecting comparison type for ${products.length} products`)
+  
+  // Check if comparing by family
+  const families = products.map(p => p.family || p.Family || p.product_family || '').filter(Boolean)
+  const uniqueFamilies = new Set(families)
+  if (uniqueFamilies.size > 1 && uniqueFamilies.size === products.length) {
+    console.log(`✅ Different families detected - treating as family comparison`)
+    return 'family'
+  }
+  
+  // Check if comparing by product type
+  const types = products.map(p => p.product_type || p.productType || p.type || '').filter(Boolean)
+  const uniqueTypes = new Set(types)
+  if (uniqueTypes.size > 1 && uniqueTypes.size === products.length) {
+    console.log(`✅ Different types detected - treating as product_type comparison`)
+    return 'product_type'
+  }
+  
+  // Check if comparing by specification
+  const specs = products.map(p => p.specification || p.Specification || p.spec || '').filter(Boolean)
+  const uniqueSpecs = new Set(specs)
+  if (uniqueSpecs.size > 1 && uniqueSpecs.size === products.length) {
+    console.log(`✅ Different specifications detected - treating as specification comparison`)
+    return 'specification'
+  }
+  
+  console.log(`✅ Treating as general product comparison`)
+  return 'general'
 }
 
 export async function POST(request: NextRequest) {
@@ -547,56 +635,56 @@ IMPORTANT NOTES:
 QUESTION TYPE DETECTION:
 
 1. **ANALYTICAL QUESTIONS** (why, how, what makes, explain, tell me about, advantages, benefits, uses, best, recommend, which product):
-   - Set questionType: "analytical"
-   - These require AI-generated summaries based on product data
-   - Examples: "Why use Korotherm?", "What are the benefits of PS 870?", "Which product is best for firewall?"
-   - **CRITICAL: For application-based queries, use TARGETED search:**
-     - Primary keyword: Main application term (e.g., "firewall")
-     - Search in: sku, product_name, name, description, application fields
-     - Use "any" searchType (OR logic)
-     - Set limit: 100 (manageable for AI analysis)
-   - For specific product family queries (e.g., "tell me about PS 870"), search for that product name
+ - Set questionType: "analytical"
+ - These require AI-generated summaries based on product data
+ - Examples: "Why use Korotherm?", "What are the benefits of PS 870?", "Which product is best for firewall?"
+ - **CRITICAL: For application-based queries, use TARGETED search:**
+   - Primary keyword: Main application term (e.g., "firewall")
+   - Search in: sku, product_name, name, description, application fields
+   - Use "any" searchType (OR logic)
+   - Set limit: 100 (manageable for AI analysis)
+ - For specific product family queries (e.g., "tell me about PS 870"), search for that product name
 
 2. **SINGLE PRODUCT QUERY** (e.g., "PS 870", "PR-148"):
-   - Set questionType: "list"
-   - Search broadly: %PS%870% will match "PS870", "PS-870", "PS 870", "P/S 870"
-   - Search in: sku, product_name, name, searchable_text
-   - Use "any" searchType to find ALL variants
-   - Set limit: null (to show all variants like Class A, B, C)
+ - Set questionType: "list"
+ - Search broadly: %PS%870% will match "PS870", "PS-870", "PS 870", "P/S 870"
+ - Search in: sku, product_name, name, searchable_text
+ - Use "any" searchType to find ALL variants
+ - Set limit: null (to show all variants like Class A, B, C)
 
 3. **COMPARISON QUERIES** ("difference", "compare", "vs", "versus", "between"):
-   - Set questionType: "comparison"
-   - Extract product identifiers
-   - Create filters for EACH product with wildcards
-   - Search in: sku, product_name, name, searchable_text
-   - Use "any" searchType (OR logic)
-   - Set limit: null
+ - Set questionType: "comparison"
+ - Extract product identifiers
+ - Create filters for EACH product with wildcards
+ - Search in: sku, product_name, name, searchable_text
+ - Use "any" searchType (OR logic)
+ - Set limit: null
 
 4. **ATTRIBUTE QUESTIONS** ("what is the [attribute] of [product]"):
-   - Set questionType: "specific_ai"
-   - Search broadly for product identifier
-   - Let AI extract the specific attribute from results
-   - Set limit: 5
+ - Set questionType: "specific_ai"
+ - Search broadly for product identifier
+ - Let AI extract the specific attribute from results
+ - Set limit: 5
 
 5. **EXACT SKU LOOKUP**:
-   - Use "eq" operator only if SKU format is exact (e.g., "0870A00276012PT")
-   - Otherwise use "ilike" with wildcards
+ - Use "eq" operator only if SKU format is exact (e.g., "0870A00276012PT")
+ - Otherwise use "ilike" with wildcards
 
 RESPONSE FORMAT (JSON):
 {
-  "filters": [
-    {
-      "column": "column_name",
-      "operator": "eq" | "ilike",
-      "value": "value"
-    }
-  ],
-  "searchType": "all" | "any",
-  "questionType": "list" | "specific_ai" | "comparison" | "analytical",
-  "attributeQuestion": "extracted question",
-  "compareProducts": ["product1", "product2"],
-  "limit": null | number,
-  "searchKeywords": ["keyword1", "keyword2"]
+"filters": [
+  {
+    "column": "column_name",
+    "operator": "eq" | "ilike",
+    "value": "value"
+  }
+],
+"searchType": "all" | "any",
+"questionType": "list" | "specific_ai" | "comparison" | "analytical",
+"attributeQuestion": "extracted question",
+"compareProducts": ["product1", "product2"],
+"limit": null | number,
+"searchKeywords": ["keyword1", "keyword2"]
 }
 
 CRITICAL RULES FOR ANALYTICAL QUERIES:
@@ -612,46 +700,46 @@ EXAMPLES:
 Query: "Which product is best for firewall sealant?"
 Response:
 {
-  "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%firewall%"},
-    {"column": "product_name", "operator": "ilike", "value": "%firewall%"},
-    {"column": "name", "operator": "ilike", "value": "%firewall%"},
-    {"column": "description", "operator": "ilike", "value": "%firewall%"},
-    {"column": "searchable_text", "operator": "ilike", "value": "%firewall%"}
-  ],
-  "searchType": "any",
-  "questionType": "analytical",
-  "limit": 100,
-  "searchKeywords": ["firewall"]
+"filters": [
+  {"column": "sku", "operator": "ilike", "value": "%firewall%"},
+  {"column": "product_name", "operator": "ilike", "value": "%firewall%"},
+  {"column": "name", "operator": "ilike", "value": "%firewall%"},
+  {"column": "description", "operator": "ilike", "value": "%firewall%"},
+  {"column": "searchable_text", "operator": "ilike", "value": "%firewall%"}
+],
+"searchType": "any",
+"questionType": "analytical",
+"limit": 100,
+"searchKeywords": ["firewall"]
 }
 
 Query: "Tell me about PS 870"
 Response:
 {
-  "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%PS%870%"},
-    {"column": "product_name", "operator": "ilike", "value": "%PS%870%"},
-    {"column": "searchable_text", "operator": "ilike", "value": "%PS%870%"}
-  ],
-  "searchType": "any",
-  "questionType": "analytical",
-  "limit": 50,
-  "searchKeywords": ["PS 870"]
+"filters": [
+  {"column": "sku", "operator": "ilike", "value": "%PS%870%"},
+  {"column": "product_name", "operator": "ilike", "value": "%PS%870%"},
+  {"column": "searchable_text", "operator": "ilike", "value": "%PS%870%"}
+],
+"searchType": "any",
+"questionType": "analytical",
+"limit": 50,
+"searchKeywords": ["PS 870"]
 }
 
 Query: "show me a product for firewall"
 Response:
 {
-  "filters": [
-    {"column": "sku", "operator": "ilike", "value": "%firewall%"},
-    {"column": "product_name", "operator": "ilike", "value": "%firewall%"},
-    {"column": "description", "operator": "ilike", "value": "%firewall%"},
-    {"column": "searchable_text", "operator": "ilike", "value": "%firewall%"}
-  ],
-  "searchType": "any",
-  "questionType": "analytical",
-  "limit": 100,
-  "searchKeywords": ["firewall"]
+"filters": [
+  {"column": "sku", "operator": "ilike", "value": "%firewall%"},
+  {"column": "product_name", "operator": "ilike", "value": "%firewall%"},
+  {"column": "description", "operator": "ilike", "value": "%firewall%"},
+  {"column": "searchable_text", "operator": "ilike", "value": "%firewall%"}
+],
+"searchType": "any",
+"questionType": "analytical",
+"limit": 100,
+"searchKeywords": ["firewall"]
 }`
         },
         {
@@ -874,7 +962,7 @@ Response:
       })
     }
 
-    // Step 5: Handle comparison questions
+    // Step 5: Handle comparison questions - ALWAYS WITH AI ANALYSIS
     if (searchParams.questionType === "comparison") {
       console.log(`🔄 Comparison mode - found ${cleanedResults.length} products`)
       
@@ -899,11 +987,21 @@ Response:
           ? groupedProducts.slice(0, 2) 
           : cleanedResults.slice(0, 2)
         
+        // Detect comparison type
+        const comparisonType = detectComparisonType(productsToCompare)
+        console.log(`📊 Comparison type detected: ${comparisonType}`)
+        
+        // ALWAYS generate AI analysis for ALL comparisons
+        console.log(`🤖 Generating AI comparison analysis`)
+        const comparisonSummary = await generateComparisonAnalysis(query, productsToCompare, comparisonType)
+        
         return NextResponse.json({
           success: true,
           questionType: "comparison",
           products: productsToCompare,
           compareProducts: searchParams.compareProducts || [],
+          comparisonType: comparisonType,
+          comparisonSummary: comparisonSummary,
           totalFound: cleanedResults.length
         })
       } else {

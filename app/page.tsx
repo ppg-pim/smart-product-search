@@ -272,6 +272,70 @@ export default function Home() {
     )
   }
 
+  const renderComparisonSummary = () => {
+    if (!comparisonData || !comparisonData.comparisonSummary) return null
+
+    return (
+      <div className="mb-8">
+        <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border-l-4 border-purple-500 rounded-lg overflow-hidden shadow-lg">
+          <div className="p-6">
+            <div className="flex items-start mb-4">
+              <div className="flex-shrink-0">
+                <svg className="h-8 w-8 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <div className="ml-4 flex-1">
+                <h2 className="text-2xl font-bold text-purple-900 mb-2">Comparison Analysis</h2>
+                <p className="text-purple-700 text-sm">
+                  {comparisonData.comparisonType === 'sku' ? 'SKU-to-SKU Comparison' : `Comparing ${comparisonData.products?.length || 0} products`}
+                </p>
+              </div>
+            </div>
+            
+            <div className="prose prose-purple max-w-none">
+              <div 
+                className="text-gray-800 leading-relaxed whitespace-pre-wrap"
+                dangerouslySetInnerHTML={{ 
+                  __html: comparisonData.comparisonSummary
+                    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-purple-900">$1</strong>')
+                    .replace(/\n\n/g, '</p><p class="mt-4">')
+                    .replace(/^/, '<p>')
+                    .replace(/$/, '</p>')
+                    .replace(/• /g, '<li class="ml-4">')
+                    .replace(/<\/p><p class="mt-4"><li/g, '</p><ul class="list-disc ml-6 mt-2 space-y-1"><li')
+                    .replace(/<li class="ml-4">(.*?)<\/p>/g, '<li class="ml-4">$1</li></ul><p class="mt-4">')
+                }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <svg className="h-5 w-5 text-blue-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span className="text-sm font-medium text-blue-900">
+                Detailed comparison table available below
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                const element = document.getElementById('comparison-table')
+                element?.scrollIntoView({ behavior: 'smooth' })
+              }}
+              className="text-sm font-medium text-blue-600 hover:text-blue-800 underline"
+            >
+              View Table →
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const renderComparison = () => {
     if (!comparisonData || !comparisonData.products || comparisonData.products.length < 2) {
       return null
@@ -286,7 +350,7 @@ export default function Home() {
     const technical = allKeys.filter(k => !priorityFields.includes(k.toLowerCase()))
 
     return (
-      <div className="mb-8">
+      <div className="mb-8" id="comparison-table">
         <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 p-6 rounded-lg">
           <h2 className="text-2xl font-bold text-blue-900 mb-2">Product Comparison</h2>
           <p className="text-blue-700">Comparing {products.length} products - Differences are highlighted</p>
@@ -566,6 +630,8 @@ export default function Home() {
       )}
 
       {analyticalData && renderAnalyticalSummary()}
+
+      {comparisonData && comparisonData.comparisonSummary && renderComparisonSummary()}
 
       {comparisonData && renderComparison()}
 
