@@ -11,7 +11,261 @@ const openai = new OpenAI({
 
 type ProductRecord = Record<string, any>
 
-// Enhanced HTML stripping with comprehensive entity handling
+// ============================================================================
+// HELPER: Generate search variations for product codes
+// ============================================================================
+
+function generateSearchVariations(productCode: string): string[] {
+  const variations = new Set<string>()
+  
+  // Original
+  variations.add(productCode)
+  
+  // Remove all spaces and special chars
+  const cleaned = productCode.replace(/[\s\-\/®™©]/g, '')
+  if (cleaned.length >= 2) {
+    variations.add(cleaned)
+  }
+  
+  // Extract just the number
+  const numberMatch = productCode.match(/(\d+)/)
+  if (numberMatch && numberMatch[1].length >= 2) {
+    variations.add(numberMatch[1])
+  }
+  
+  // Common patterns
+  const patterns = [
+    productCode.replace(/\//g, ''),           // P/S510 → PS510
+    productCode.replace(/\//g, ' '),          // P/S510 → P S510
+    productCode.replace(/([A-Z\/]+)(\d+)/i, '$1 $2'), // P/S510 → P/S 510
+    productCode.replace(/\//g, '').replace(/([A-Z]+)(\d+)/i, '$1 $2'), // P/S510 → PS 510
+    productCode.replace(/[\s\-]/g, ''),       // Remove spaces and dashes
+  ]
+  
+  patterns.forEach(p => {
+    if (p.length >= 2) {
+      variations.add(p)
+    }
+  })
+  
+  // Filter out very short terms (less than 2 chars)
+  return Array.from(variations).filter(v => v.length >= 2)
+}
+
+// ============================================================================
+// META-QUESTION DETECTION
+// ============================================================================
+
+function detectMetaQuestion(query: string): { isMeta: boolean; type: string | null } {
+  const lowerQuery = query.toLowerCase().trim()
+  
+  // Check if query mentions specific product (PS 870, PR-1422, etc.)
+  const hasSpecificProduct = /\b(ps|p\/s|pr|korotherm|class|[a-z]{2,}\s*\d{3,}|\d{3,})\b/i.test(query)
+  
+  // Count questions - BUT ONLY if no specific product/filter is mentioned
+  if (
+    (lowerQuery.match(/^how many (products?|items?|sealants?|entries?)(\s+(are|do|in))?$/) ||
+    lowerQuery.match(/^total (number of )?(products?|items?|sealants?)$/) ||
+    lowerQuery.match(/^count (of )?(products?|items?|sealants?)$/)) &&
+    !hasSpecificProduct
+  ) {
+    console.log('🎯 Detected generic count query (no specific product)')
+    return { isMeta: true, type: 'count' }
+  }
+  
+  // List families/types questions
+  if (
+    lowerQuery.match(/what (are the |kinds of |types of )?(families|family|types?|categories)/) ||
+    lowerQuery.match(/list (all )?(families|family|types?|categories|products?)/) ||
+    lowerQuery.match(/show (me )?(all )?(families|family|types?|categories)/)
+  ) {
+    return { isMeta: true, type: 'list' }
+  }
+  
+  // Database info questions
+  if (
+    lowerQuery.match(/what('s| is) in (the |this )?database/) ||
+    lowerQuery.match(/tell me about (the |this )?database/) ||
+    lowerQuery.match(/database (info|information|overview|summary)/)
+  ) {
+    return { isMeta: true, type: 'overview' }
+  }
+  
+  return { isMeta: false, type: null }
+}
+
+// ============================================================================
+// COUNT QUERY DETECTION (for specific products)
+// ============================================================================
+
+function isCountQuery(query: string): boolean {
+  const lowerQuery = query.toLowerCase().trim()
+  return (
+    lowerQuery.startsWith('how many') ||
+    lowerQuery.startsWith('count') ||
+    lowerQuery.includes('how many products') ||
+    lowerQuery.includes('total number of')
+  )
+}
+
+async function handleMetaQuestion(
+  type: string,
+  query: string,
+  filters: any
+): Promise<any> {
+  console.log(`🔍 Handling meta-question type: ${type}`)
+  
+  try {
+    if (type === 'count') {
+      // Build query with filters
+      let countQuery = supabase
+        .from('products')
+        .select('*', { count: 'exact', head: true })
+      
+      // Apply user filters
+      if (filters?.family) countQuery = countQuery.eq('family', filters.family)
+      if (filters?.productType) countQuery = countQuery.eq('product_type', filters.productType)
+      if (filters?.specification) countQuery = countQuery.eq('specification', filters.specification)
+      
+      // Check if query mentions specific category (e.g., "sealants")
+      const lowerQuery = query.toLowerCase()
+      if (lowerQuery.includes('sealant')) {
+        countQuery = countQuery.or(
+          'categories.ilike.%Sealants%,' +
+          'family.ilike.%Sealant%,' +
+          'product_type.ilike.%Sealant%,' +
+          'searchable_text.ilike.%Sealant%'
+        )
+      }
+      
+      const { count, error } = await countQuery
+      
+      if (error) {
+        console.error('❌ Error counting products:', error)
+        throw error
+      }
+      
+      console.log(`✅ Total products: ${count}`)
+      
+      const filterText = filters?.family || filters?.productType || filters?.specification
+        ? ` with applied filters`
+        : ''
+      
+      const categoryText = lowerQuery.includes('sealant') ? ' in Sealants category' : ''
+      
+      const summary = `**Product Count${categoryText}**
+
+I found **${(count || 0).toLocaleString()} products**${categoryText}${filterText}.
+
+${count && count > 100 ? 'You can use filters or search for specific products to narrow down the results.' : ''}`
+      
+      return {
+        success: true,
+        questionType: 'meta',
+        metaType: 'count',
+        summary,
+        count: count || 0,
+        results: []
+      }
+    }
+    
+    if (type === 'list') {
+      // Get unique families, types, and specifications
+      const { data: familyData } = await supabase
+        .from('products')
+        .select('family')
+        .not('family', 'is', null)
+        .limit(1000)
+      
+      const { data: typeData } = await supabase
+        .from('products')
+        .select('product_type')
+        .not('product_type', 'is', null)
+        .limit(1000)
+      
+      const families = [...new Set(familyData?.map((r: any) => r.family).filter(Boolean))].sort()
+      const types = [...new Set(typeData?.map((r: any) => r.product_type).filter(Boolean))].sort()
+      
+      console.log(`✅ Found ${families.length} families, ${types.length} types`)
+      
+      const summary = `**Product Categories Overview**
+
+**Product Families (${families.length} total):**
+${families.slice(0, 20).map(f => `• ${f}`).join('\n')}
+${families.length > 20 ? `\n_...and ${families.length - 20} more_` : ''}
+
+**Product Types (${types.length} total):**
+${types.slice(0, 15).map(t => `• ${t}`).join('\n')}
+${types.length > 15 ? `\n_...and ${types.length - 15} more_` : ''}
+
+You can filter by any of these categories using the filter options in the search interface.`
+      
+      return {
+        success: true,
+        questionType: 'meta',
+        metaType: 'list',
+        summary,
+        families,
+        types,
+        results: []
+      }
+    }
+    
+    if (type === 'overview') {
+      // Get comprehensive database overview
+      const { count } = await supabase
+        .from('products')
+        .select('*', { count: 'exact', head: true })
+      
+      const { data: familyData } = await supabase
+        .from('products')
+        .select('family')
+        .not('family', 'is', null)
+        .limit(500)
+      
+      const families = [...new Set(familyData?.map((r: any) => r.family).filter(Boolean))]
+      
+      const summary = `**Aerospace Products Database Overview**
+
+**Total Products:** ${(count || 0).toLocaleString()} aerospace products
+
+**Product Families:** ${families.length} unique families including ${families.slice(0, 5).join(', ')}, and more.
+
+**Search Capabilities:**
+• Natural language search across all product specifications
+• Compare products side-by-side
+• Filter by family, type, and specification
+• AI-powered product recommendations
+
+**Example Queries:**
+• "Best sealant for firewall application"
+• "Compare PS 870 vs PR 1422"
+• "Show me all primers"
+• "What products are in the Korotherm family?"`
+      
+      return {
+        success: true,
+        questionType: 'meta',
+        metaType: 'overview',
+        summary,
+        totalCount: count || 0,
+        familyCount: families.length,
+        results: []
+      }
+    }
+    
+  } catch (error: any) {
+    console.error('❌ Meta-question handler error:', error)
+    throw error
+  }
+  
+  return null
+}
+
+// ============================================================================
+// HTML STRIPPING & DATA CLEANING
+// ============================================================================
+
 function stripHtml(html: string): string {
   if (typeof html !== 'string') return html
   return html
@@ -64,7 +318,6 @@ function stripHtml(html: string): string {
     .trim()
 }
 
-// Helper function to clean and flatten product data
 function cleanProductData(product: ProductRecord): ProductRecord {
   const cleaned: ProductRecord = {}
   const seen = new Set<string>()
@@ -128,7 +381,10 @@ function cleanProductData(product: ProductRecord): ProductRecord {
   return cleaned
 }
 
-// NEW: Score and rank products by relevance
+// ============================================================================
+// PRODUCT RELEVANCE SCORING
+// ============================================================================
+
 function scoreProductRelevance(product: ProductRecord, keywords: string[]): number {
   let score = 0
   const productText = JSON.stringify(product).toLowerCase()
@@ -137,25 +393,28 @@ function scoreProductRelevance(product: ProductRecord, keywords: string[]): numb
     const lowerKeyword = keyword.toLowerCase()
     const keywordCount = (productText.match(new RegExp(lowerKeyword, 'g')) || []).length
     
-    // Higher weight for keywords in important fields
     const sku = (product.sku || '').toLowerCase()
     const name = (product.product_name || product.name || '').toLowerCase()
     const description = (product.description || '').toLowerCase()
     const application = (product.application || product.Application || '').toLowerCase()
+    const family = (product.family || product.Family || '').toLowerCase()
     
     if (sku.includes(lowerKeyword)) score += 50
     if (name.includes(lowerKeyword)) score += 30
+    if (family.includes(lowerKeyword)) score += 25
     if (application.includes(lowerKeyword)) score += 20
     if (description.includes(lowerKeyword)) score += 10
     
-    // General occurrence bonus
     score += keywordCount * 2
   })
   
   return score
 }
 
-// Helper to truncate product data for AI processing
+// ============================================================================
+// AI HELPER FUNCTIONS
+// ============================================================================
+
 function truncateProductForAI(product: ProductRecord, maxLength: number = 3000): string {
   let result = JSON.stringify(product, null, 2)
   
@@ -184,135 +443,14 @@ function truncateProductForAI(product: ProductRecord, maxLength: number = 3000):
   return result
 }
 
-// Helper function to build query string for OR conditions
-function buildOrConditions(filters: any[], columns: string[]): string | null {
-  const orConditions = filters
-    .map((filter: any) => {
-      const { column, operator, value } = filter
-      
-      if (!columns.includes(column)) {
-        console.warn(`Column "${column}" not found`)
-        return null
-      }
-      
-      switch (operator) {
-        case 'eq':
-          return `${column}.eq.${value}`
-        case 'ilike':
-          return `${column}.ilike.${value}`
-        case 'gt':
-          return `${column}.gt.${value}`
-        case 'lt':
-          return `${column}.lt.${value}`
-        case 'gte':
-          return `${column}.gte.${value}`
-        case 'lte':
-          return `${column}.lte.${value}`
-        default:
-          return null
-      }
-    })
-    .filter(Boolean)
-  
-  return orConditions.length > 0 ? orConditions.join(',') : null
-}
-
-// Helper to apply user filters with flexible column matching
-function applyUserFilters(dbQuery: any, filters: any, columns: string[], allProducts: any[]) {
-  if (!filters) return dbQuery
-
-  // For family filter
-  if (filters.family) {
-    const familyColumns = ['family', 'Family', 'product_family', 'productFamily'].filter(col => columns.includes(col))
-    
-    if (familyColumns.length > 0) {
-      dbQuery = dbQuery.eq(familyColumns[0], filters.family)
-      console.log(`🎯 Applied family filter on column "${familyColumns[0]}": ${filters.family}`)
-    } else {
-      console.log(`⚠️ Family column not found in DB, will filter in memory`)
-    }
-  }
-
-  // For product type filter
-  if (filters.productType) {
-    const typeColumns = ['product_type', 'productType', 'type', 'Type', 'category', 'Category'].filter(col => columns.includes(col))
-    
-    if (typeColumns.length > 0) {
-      dbQuery = dbQuery.eq(typeColumns[0], filters.productType)
-      console.log(`🎯 Applied product type filter on column "${typeColumns[0]}": ${filters.productType}`)
-    } else {
-      console.log(`⚠️ Product type column not found in DB, will filter in memory`)
-    }
-  }
-
-  // For specification filter
-  if (filters.specification) {
-    const specColumns = ['specification', 'Specification', 'spec', 'Spec'].filter(col => columns.includes(col))
-    
-    if (specColumns.length > 0) {
-      dbQuery = dbQuery.eq(specColumns[0], filters.specification)
-      console.log(`🎯 Applied specification filter on column "${specColumns[0]}": ${filters.specification}`)
-    } else {
-      console.log(`⚠️ Specification column not found in DB, will filter in memory`)
-    }
-  }
-
-  return dbQuery
-}
-
-// Helper to filter products in memory (fallback when DB columns don't exist)
-function filterProductsInMemory(products: any[], filters: any): any[] {
-  if (!filters) return products
-
-  return products.filter(product => {
-    let matches = true
-
-    // Check family
-    if (filters.family) {
-      const familyValue = product.family || product.Family || product.product_family || product.productFamily
-      const attrFamily = product.all_attributes?.family || product.all_attributes?.Family
-      
-      if (familyValue !== filters.family && attrFamily !== filters.family) {
-        matches = false
-      }
-    }
-
-    // Check product type
-    if (filters.productType) {
-      const typeValue = product.product_type || product.productType || product.type || product.Type || product.category || product.Category
-      const attrType = product.all_attributes?.product_type || product.all_attributes?.type
-      
-      if (typeValue !== filters.productType && attrType !== filters.productType) {
-        matches = false
-      }
-    }
-
-    // Check specification
-    if (filters.specification) {
-      const specValue = product.specification || product.Specification || product.spec || product.Spec
-      const attrSpec = product.all_attributes?.specification || product.all_attributes?.spec
-      
-      if (specValue !== filters.specification && attrSpec !== filters.specification) {
-        matches = false
-      }
-    }
-
-    return matches
-  })
-}
-
-// NEW: Generate AI summary from multiple products
 async function generateAISummary(query: string, products: ProductRecord[]): Promise<string> {
   try {
-    // Limit to top 50 products and use aggressive truncation
     const productsData = products.slice(0, 25).map(p => truncateProductForAI(p, 2000))
     const combinedData = productsData.join('\n\n---\n\n')
     
-    // Safety check for token limits
-    const estimatedTokens = combinedData.length / 4 // rough estimate
+    const estimatedTokens = combinedData.length / 4
     if (estimatedTokens > 20000) {
       console.warn(`⚠️ Data too large (${estimatedTokens} tokens), reducing to top 15 products`)
-      const reducedData = products.slice(0, 15).map(p => truncateProductForAI(p, 1500))
       return await generateAISummary(query, products.slice(0, 15))
     }
     
@@ -332,10 +470,10 @@ GUIDELINES:
 - Use specific product details and technical specifications as evidence
 - Explain WHY certain products are used (applications, benefits, specifications)
 - When asked about "best" products, analyze ALL products and recommend based on:
-* Specific application requirements (e.g., firewall, fuel tank, pressurized cabin)
-* Technical specifications that match the use case
-* Industry standards and certifications
-* Performance characteristics
+  * Specific application requirements (e.g., firewall, fuel tank, pressurized cabin)
+  * Technical specifications that match the use case
+  * Industry standards and certifications
+  * Performance characteristics
 - Compare products when relevant and explain trade-offs
 - Provide recommendations based on use cases
 - Use bullet points for clarity when listing features or benefits
@@ -372,7 +510,6 @@ ${combinedData}`
   } catch (error: any) {
     console.error('❌ AI summary generation error:', error.message)
     
-    // If token limit error, try with fewer products
     if (error.message?.includes('tokens') && products.length > 10) {
       console.log('🔄 Retrying with fewer products...')
       return await generateAISummary(query, products.slice(0, 10))
@@ -382,7 +519,6 @@ ${combinedData}`
   }
 }
 
-// NEW: Generate comparison analysis for ALL comparisons
 async function generateComparisonAnalysis(query: string, products: ProductRecord[], comparisonType: string): Promise<string> {
   try {
     const productsData = products.map(p => truncateProductForAI(p, 3000))
@@ -436,13 +572,11 @@ ${combinedData}`
   }
 }
 
-// SIMPLIFIED: Detect comparison type based on products
 function detectComparisonType(products: ProductRecord[]): string {
   if (products.length < 2) return 'general'
   
   console.log(`🔍 Detecting comparison type for ${products.length} products`)
   
-  // Check if comparing by family
   const families = products.map(p => p.family || p.Family || p.product_family || '').filter(Boolean)
   const uniqueFamilies = new Set(families)
   if (uniqueFamilies.size > 1 && uniqueFamilies.size === products.length) {
@@ -450,7 +584,6 @@ function detectComparisonType(products: ProductRecord[]): string {
     return 'family'
   }
   
-  // Check if comparing by product type
   const types = products.map(p => p.product_type || p.productType || p.type || '').filter(Boolean)
   const uniqueTypes = new Set(types)
   if (uniqueTypes.size > 1 && uniqueTypes.size === products.length) {
@@ -458,7 +591,6 @@ function detectComparisonType(products: ProductRecord[]): string {
     return 'product_type'
   }
   
-  // Check if comparing by specification
   const specs = products.map(p => p.specification || p.Specification || p.spec || '').filter(Boolean)
   const uniqueSpecs = new Set(specs)
   if (uniqueSpecs.size > 1 && uniqueSpecs.size === products.length) {
@@ -470,12 +602,131 @@ function detectComparisonType(products: ProductRecord[]): string {
   return 'general'
 }
 
+// ============================================================================
+// DATABASE QUERY HELPERS
+// ============================================================================
+
+function buildOrConditions(filters: any[], columns: string[]): string | null {
+  const orConditions = filters
+    .map((filter: any) => {
+      const { column, operator, value } = filter
+      
+      if (!columns.includes(column)) {
+        console.warn(`Column "${column}" not found`)
+        return null
+      }
+      
+      switch (operator) {
+        case 'eq':
+          return `${column}.eq.${value}`
+        case 'ilike':
+          return `${column}.ilike.${value}`
+        case 'gt':
+          return `${column}.gt.${value}`
+        case 'lt':
+          return `${column}.lt.${value}`
+        case 'gte':
+          return `${column}.gte.${value}`
+        case 'lte':
+          return `${column}.lte.${value}`
+        default:
+          return null
+      }
+    })
+    .filter(Boolean)
+  
+  return orConditions.length > 0 ? orConditions.join(',') : null
+}
+
+function applyUserFilters(dbQuery: any, filters: any, columns: string[], allProducts: any[]) {
+  if (!filters) return dbQuery
+
+  if (filters.family) {
+    const familyColumns = ['family', 'Family', 'product_family', 'productFamily'].filter(col => columns.includes(col))
+    
+    if (familyColumns.length > 0) {
+      dbQuery = dbQuery.eq(familyColumns[0], filters.family)
+      console.log(`🎯 Applied family filter on column "${familyColumns[0]}": ${filters.family}`)
+    } else {
+      console.log(`⚠️ Family column not found in DB, will filter in memory`)
+    }
+  }
+
+  if (filters.productType) {
+    const typeColumns = ['product_type', 'productType', 'type', 'Type', 'category', 'Category'].filter(col => columns.includes(col))
+    
+    if (typeColumns.length > 0) {
+      dbQuery = dbQuery.eq(typeColumns[0], filters.productType)
+      console.log(`🎯 Applied product type filter on column "${typeColumns[0]}": ${filters.productType}`)
+    } else {
+      console.log(`⚠️ Product type column not found in DB, will filter in memory`)
+    }
+  }
+
+  if (filters.specification) {
+    const specColumns = ['specification', 'Specification', 'spec', 'Spec'].filter(col => columns.includes(col))
+    
+    if (specColumns.length > 0) {
+      dbQuery = dbQuery.eq(specColumns[0], filters.specification)
+      console.log(`🎯 Applied specification filter on column "${specColumns[0]}": ${filters.specification}`)
+    } else {
+      console.log(`⚠️ Specification column not found in DB, will filter in memory`)
+    }
+  }
+
+  return dbQuery
+}
+
+function filterProductsInMemory(products: any[], filters: any): any[] {
+  if (!filters) return products
+
+  return products.filter(product => {
+    let matches = true
+
+    if (filters.family) {
+      const familyValue = product.family || product.Family || product.product_family || product.productFamily
+      const attrFamily = product.all_attributes?.family || product.all_attributes?.Family
+      
+      if (familyValue !== filters.family && attrFamily !== filters.family) {
+        matches = false
+      }
+    }
+
+    if (filters.productType) {
+      const typeValue = product.product_type || product.productType || product.type || product.Type || product.category || product.Category
+      const attrType = product.all_attributes?.product_type || product.all_attributes?.type
+      
+      if (typeValue !== filters.productType && attrType !== filters.productType) {
+        matches = false
+      }
+    }
+
+    if (filters.specification) {
+      const specValue = product.specification || product.Specification || product.spec || product.Spec
+      const attrSpec = product.all_attributes?.specification || product.all_attributes?.spec
+      
+      if (specValue !== filters.specification && attrSpec !== filters.specification) {
+        matches = false
+      }
+    }
+
+    return matches
+  })
+}
+
+// ============================================================================
+// MAIN POST HANDLER
+// ============================================================================
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { query, filters, getFilterOptions } = body
 
-    // Handle filter options request
+    // ========================================================================
+    // FILTER OPTIONS REQUEST
+    // ========================================================================
+    
     if (query === '__GET_FILTER_OPTIONS__' || getFilterOptions === true) {
       console.log('📋 Loading filter options...')
       
@@ -494,25 +745,21 @@ export async function POST(request: NextRequest) {
         const specifications = new Set<string>()
 
         products?.forEach((product: any) => {
-          // Extract family
           const familyValue = product.family || product.Family || product.product_family || product.productFamily
           if (familyValue && String(familyValue).trim()) {
             families.add(String(familyValue).trim())
           }
 
-          // Extract product type
           const typeValue = product.product_type || product.productType || product.type || product.Type || product.category || product.Category
           if (typeValue && String(typeValue).trim()) {
             productTypes.add(String(typeValue).trim())
           }
 
-          // Extract specification
           const specValue = product.specification || product.Specification || product.spec || product.Spec
           if (specValue && String(specValue).trim()) {
             specifications.add(String(specValue).trim())
           }
 
-          // Also check in all_attributes
           if (product.all_attributes) {
             try {
               let attributes: any = typeof product.all_attributes === 'string' 
@@ -567,7 +814,10 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Regular search flow continues below
+    // ========================================================================
+    // VALIDATE QUERY
+    // ========================================================================
+    
     if (!query) {
       return NextResponse.json(
         { error: 'Query is required' },
@@ -578,7 +828,23 @@ export async function POST(request: NextRequest) {
     console.log('🔍 User query:', query)
     console.log('🎯 Applied filters:', filters)
 
-    // Step 1: Get table schema with sample data
+    // ========================================================================
+    // CHECK FOR META-QUESTIONS (count, list, overview)
+    // ========================================================================
+    
+    const metaCheck = detectMetaQuestion(query)
+    if (metaCheck.isMeta && metaCheck.type) {
+      console.log(`🎯 Detected meta-question type: ${metaCheck.type}`)
+      const metaResult = await handleMetaQuestion(metaCheck.type, query, filters)
+      if (metaResult) {
+        return NextResponse.json(metaResult)
+      }
+    }
+
+    // ========================================================================
+    // STEP 1: GET DATABASE SCHEMA
+    // ========================================================================
+    
     const { data: sampleData, error: schemaError } = await supabase
       .from('products')
       .select('*')
@@ -607,7 +873,10 @@ export async function POST(request: NextRequest) {
 
     console.log('📊 Available columns:', columns.length)
 
-    // Step 2: Use GPT-4o-mini to understand the query
+    // ========================================================================
+    // STEP 2: USE GPT-4O-MINI TO UNDERSTAND QUERY
+    // ========================================================================
+    
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
@@ -626,120 +895,148 @@ ${filters ? JSON.stringify(filters, null, 2) : 'None'}
 
 IMPORTANT NOTES:
 - The "searchable_text" column contains ALL product information (flattened from all_attributes)
-- Product identifiers can be in "sku", "product_name", or "name" columns
-- Use SPECIFIC searches for better performance
+- Product identifiers can be in "sku", "product_name", "name", or "family" columns
 - Products may have variants (e.g., "P/S 870 Class A", "P/S 870 Class B", "P/S 870 Class C")
-- When user asks for a product family (e.g., "PS 870"), show ALL variants
+- When user asks for a product family (e.g., "PS 870" or "P/S510"), show ALL variants
+- Product codes may have spaces, slashes, or special characters (e.g., "P/S 510®", "PS510", "P/S-510")
+- For product name queries, search JUST THE NUMBER to catch all variations
 - If user has applied filters (family, productType, specification), incorporate them into the search
 
 QUESTION TYPE DETECTION:
 
-1. **ANALYTICAL QUESTIONS** (why, how, what makes, explain, tell me about, advantages, benefits, uses, best, recommend, which product):
+1. **COUNT QUESTIONS** (how many, count, total number):
+ - Set questionType: "count"
+ - Extract JUST THE NUMBER from product name
+ - Search in: sku, product_name, family, searchable_text
+ - Use "any" searchType (OR logic)
+ - Set limit: 500 (reasonable for counting)
+
+2. **ANALYTICAL QUESTIONS** (why, how, what makes, explain, tell me about, what is, advantages, benefits, uses, best, recommend, which product):
  - Set questionType: "analytical"
  - These require AI-generated summaries based on product data
- - Examples: "Why use Korotherm?", "What are the benefits of PS 870?", "Which product is best for firewall?"
- - **CRITICAL: For application-based queries, use TARGETED search:**
-   - Primary keyword: Main application term (e.g., "firewall")
-   - Search in: sku, product_name, name, description, application fields
-   - Use "any" searchType (OR logic)
-   - Set limit: 100 (manageable for AI analysis)
- - For specific product family queries (e.g., "tell me about PS 870"), search for that product name
-
-2. **SINGLE PRODUCT QUERY** (e.g., "PS 870", "PR-148"):
- - Set questionType: "list"
- - Search broadly: %PS%870% will match "PS870", "PS-870", "PS 870", "P/S 870"
- - Search in: sku, product_name, name, searchable_text
- - Use "any" searchType to find ALL variants
- - Set limit: null (to show all variants like Class A, B, C)
-
-3. **COMPARISON QUERIES** ("difference", "compare", "vs", "versus", "between"):
- - Set questionType: "comparison"
- - Extract product identifiers
- - Create filters for EACH product with wildcards
- - Search in: sku, product_name, name, searchable_text
+ - Examples: "Why use Korotherm?", "What are the benefits of PS 870?", "Which product is best for firewall?", "What is P/S510?"
+ - **CRITICAL: For product family queries (e.g., "what is P/S510"), extract JUST THE NUMBER:**
+   - "P/S510" → search for "510"
+   - "PS 870" → search for "870"
+   - "PR-1422" → search for "1422"
+ - Search in: sku, product_name, name, family, searchable_text
  - Use "any" searchType (OR logic)
- - Set limit: null
+ - Set limit: 50 (manageable for AI analysis)
 
-4. **ATTRIBUTE QUESTIONS** ("what is the [attribute] of [product]"):
+3. **SINGLE PRODUCT QUERY** (e.g., "PS 870", "PR-148", "P/S510"):
+ - Set questionType: "list"
+ - Extract JUST THE NUMBER: "PS 870" → "870", "P/S510" → "510"
+ - Search in: sku, product_name, name, family, searchable_text
+ - Use "any" searchType to find ALL variants
+ - Set limit: 500
+
+4. **COMPARISON QUERIES** ("difference", "compare", "vs", "versus", "between"):
+ - Set questionType: "comparison"
+ - Extract product identifiers (just numbers)
+ - Create filters for EACH product
+ - Search in: sku, product_name, name, family, searchable_text
+ - Use "any" searchType (OR logic)
+ - Set limit: 500
+
+5. **ATTRIBUTE QUESTIONS** ("what is the [attribute] of [product]"):
  - Set questionType: "specific_ai"
- - Search broadly for product identifier
+ - Extract just the number from product name
  - Let AI extract the specific attribute from results
  - Set limit: 5
 
-5. **EXACT SKU LOOKUP**:
- - Use "eq" operator only if SKU format is exact (e.g., "0870A00276012PT")
- - Otherwise use "ilike" with wildcards
+6. **APPLICATION-BASED QUERIES** ("best for [application]", "product for [use]"):
+ - Set questionType: "analytical"
+ - Extract PRIMARY keyword (e.g., "firewall", "fuel tank")
+ - Search in: sku, product_name, name, description, application, searchable_text
+ - Set limit: 100
+ - Use "any" searchType
 
 RESPONSE FORMAT (JSON):
 {
-"filters": [
-  {
-    "column": "column_name",
-    "operator": "eq" | "ilike",
-    "value": "value"
-  }
-],
-"searchType": "all" | "any",
-"questionType": "list" | "specific_ai" | "comparison" | "analytical",
-"attributeQuestion": "extracted question",
-"compareProducts": ["product1", "product2"],
-"limit": null | number,
-"searchKeywords": ["keyword1", "keyword2"]
+  "filters": [
+    {
+      "column": "column_name",
+      "operator": "eq" | "ilike",
+      "value": "value"
+    }
+  ],
+  "searchType": "all" | "any",
+  "questionType": "list" | "count" | "specific_ai" | "comparison" | "analytical",
+  "attributeQuestion": "extracted question",
+  "compareProducts": ["product1", "product2"],
+  "limit": null | number,
+  "searchKeywords": ["keyword1", "keyword2"]
 }
 
-CRITICAL RULES FOR ANALYTICAL QUERIES:
-- For "best for [application]" queries, extract PRIMARY keyword (e.g., "firewall")
-- Search in sku, product_name, name, description, application columns
-- Set limit: 100 (to avoid database timeout and token limits)
-- Use "any" searchType for OR logic
-- Include searchKeywords array with extracted application terms
-- Be SPECIFIC - don't use overly broad terms like "high temperature" alone
+CRITICAL RULES:
+- For product name queries, extract JUST THE NUMBER (e.g., "P/S510" → "510")
+- This catches all variations: "P/S 510®", "PS510", "P/S-510", "PS 510"
+- Always include "family" column in searches
+- Use wildcards: %510% will match anywhere in the text
+- For "what is [product]" queries, use questionType: "analytical"
+- ALWAYS set a limit (500 for count/list, 100 for analytical, 50 for specific)
 
 EXAMPLES:
 
-Query: "Which product is best for firewall sealant?"
+Query: "how many products are ps 890"
 Response:
 {
-"filters": [
-  {"column": "sku", "operator": "ilike", "value": "%firewall%"},
-  {"column": "product_name", "operator": "ilike", "value": "%firewall%"},
-  {"column": "name", "operator": "ilike", "value": "%firewall%"},
-  {"column": "description", "operator": "ilike", "value": "%firewall%"},
-  {"column": "searchable_text", "operator": "ilike", "value": "%firewall%"}
-],
-"searchType": "any",
-"questionType": "analytical",
-"limit": 100,
-"searchKeywords": ["firewall"]
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%890%"},
+    {"column": "product_name", "operator": "ilike", "value": "%890%"},
+    {"column": "family", "operator": "ilike", "value": "%890%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%890%"}
+  ],
+  "searchType": "any",
+  "questionType": "count",
+  "limit": 500,
+  "searchKeywords": ["890", "PS 890", "P/S 890"]
+}
+
+Query: "what is P/S510 sealant"
+Response:
+{
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%510%"},
+    {"column": "product_name", "operator": "ilike", "value": "%510%"},
+    {"column": "family", "operator": "ilike", "value": "%510%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%510%"}
+  ],
+  "searchType": "any",
+  "questionType": "analytical",
+  "limit": 50,
+  "searchKeywords": ["510", "P/S 510", "PS510"]
 }
 
 Query: "Tell me about PS 870"
 Response:
 {
-"filters": [
-  {"column": "sku", "operator": "ilike", "value": "%PS%870%"},
-  {"column": "product_name", "operator": "ilike", "value": "%PS%870%"},
-  {"column": "searchable_text", "operator": "ilike", "value": "%PS%870%"}
-],
-"searchType": "any",
-"questionType": "analytical",
-"limit": 50,
-"searchKeywords": ["PS 870"]
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%870%"},
+    {"column": "product_name", "operator": "ilike", "value": "%870%"},
+    {"column": "family", "operator": "ilike", "value": "%870%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%870%"}
+  ],
+  "searchType": "any",
+  "questionType": "analytical",
+  "limit": 50,
+  "searchKeywords": ["870", "PS 870", "P/S 870"]
 }
 
-Query: "show me a product for firewall"
+Query: "Which product is best for firewall sealant?"
 Response:
 {
-"filters": [
-  {"column": "sku", "operator": "ilike", "value": "%firewall%"},
-  {"column": "product_name", "operator": "ilike", "value": "%firewall%"},
-  {"column": "description", "operator": "ilike", "value": "%firewall%"},
-  {"column": "searchable_text", "operator": "ilike", "value": "%firewall%"}
-],
-"searchType": "any",
-"questionType": "analytical",
-"limit": 100,
-"searchKeywords": ["firewall"]
+  "filters": [
+    {"column": "sku", "operator": "ilike", "value": "%firewall%"},
+    {"column": "product_name", "operator": "ilike", "value": "%firewall%"},
+    {"column": "description", "operator": "ilike", "value": "%firewall%"},
+    {"column": "application", "operator": "ilike", "value": "%firewall%"},
+    {"column": "searchable_text", "operator": "ilike", "value": "%firewall%"}
+  ],
+  "searchType": "any",
+  "questionType": "analytical",
+  "limit": 100,
+  "searchKeywords": ["firewall"]
 }`
         },
         {
@@ -754,10 +1051,10 @@ Response:
 
     let searchParams
     try {
-      searchParams = JSON.parse(completion.choices[0].message.content || '{"filters": [], "searchType": "any", "questionType": "list", "limit": null}')
+      searchParams = JSON.parse(completion.choices[0].message.content || '{"filters": [], "searchType": "any", "questionType": "list", "limit": 500}')
     } catch (parseError) {
       console.error('❌ Failed to parse GPT response:', completion.choices[0].message.content)
-      searchParams = { filters: [], searchType: "any", questionType: "list", limit: null }
+      searchParams = { filters: [], searchType: "any", questionType: "list", limit: 500 }
     }
 
     console.log('📋 Parsed search params:', JSON.stringify(searchParams, null, 2))
@@ -772,10 +1069,26 @@ Response:
       searchParams.questionType = "list"
     }
 
-    // Step 3: Build Supabase query
+    // ========================================================================
+    // OPTIMIZE FOR COUNT QUERIES - ALWAYS APPLY LIMITS
+    // ========================================================================
+
+    if (isCountQuery(query)) {
+      console.log('🔢 Count query detected - applying performance optimizations')
+      searchParams.questionType = "count"
+      
+      if (!searchParams.limit || searchParams.limit > 500) {
+        searchParams.limit = 500
+        console.log('🔢 Limiting count query to 500 results for performance')
+      }
+    }
+
+    // ========================================================================
+    // STEP 3: BUILD SUPABASE QUERY
+    // ========================================================================
+    
     let dbQuery: any = supabase.from('products').select('*')
 
-    // Apply user-selected filters
     dbQuery = applyUserFilters(dbQuery, filters, columns, [])
 
     if (searchParams.filters.length > 0) {
@@ -833,16 +1146,26 @@ Response:
       )
     }
 
-    // Apply smart limits based on question type
+    // ========================================================================
+    // APPLY LIMITS FOR PERFORMANCE - ALWAYS ENFORCE LIMITS
+    // ========================================================================
+
     if (searchParams.questionType === "analytical") {
       const limit = searchParams.limit || 100
       dbQuery = dbQuery.limit(limit)
-      console.log(`🔢 Analytical query - limiting to ${limit} products for performance`)
+      console.log(`🔢 Analytical query - limiting to ${limit} products`)
+    } else if (searchParams.questionType === "count") {
+      const limit = searchParams.limit || 500
+      dbQuery = dbQuery.limit(limit)
+      console.log(`🔢 Count query - limiting to ${limit} products`)
     } else if (searchParams.limit !== undefined && searchParams.limit !== null && searchParams.limit > 0) {
       dbQuery = dbQuery.limit(searchParams.limit)
       console.log(`🔢 Applying limit: ${searchParams.limit}`)
     } else {
-      console.log(`🔢 No limit applied - fetching all matching results`)
+      // Always apply a default limit to prevent timeouts
+      const defaultLimit = 500
+      dbQuery = dbQuery.limit(defaultLimit)
+      console.log(`🔢 Applying default limit: ${defaultLimit} for performance`)
     }
 
     let { data, error } = await dbQuery
@@ -854,14 +1177,12 @@ Response:
 
     console.log(`✅ Query returned ${data?.length || 0} results`)
 
-    // Apply in-memory filtering if needed
     if (data && data.length > 0 && filters) {
       const beforeFilter = data.length
       data = filterProductsInMemory(data, filters)
       console.log(`🔄 In-memory filter: ${beforeFilter} → ${data.length} products`)
     }
 
-    // NEW: For analytical queries, rank by relevance and take top results
     if (searchParams.questionType === "analytical" && data && data.length > 0 && searchParams.searchKeywords) {
       console.log(`🎯 Ranking ${data.length} products by relevance...`)
       
@@ -877,44 +1198,47 @@ Response:
       
       scoredProducts.sort((a: ScoredProduct, b: ScoredProduct) => b.score - a.score)
       
-      // Take top 50 most relevant products
       data = scoredProducts.slice(0, 50).map((item: ScoredProduct) => item.product)
       
       console.log(`✅ Selected top ${data.length} most relevant products`)
     }
 
-    // FALLBACK: If no results, try simpler search
+    // ========================================================================
+    // IMPROVED FALLBACK SEARCH WITH VARIATIONS
+    // ========================================================================
+    
     if ((!data || data.length === 0) && searchParams.filters.length > 0) {
-      console.log('🔄 No results found, trying fallback search...')
+      console.log('🔄 No results found, trying fallback search with variations...')
       
       const searchTerms = new Set<string>()
       
-      // Extract search terms from filters
+      // Extract and generate variations from filters
       searchParams.filters.forEach((filter: any) => {
         if (filter.value) {
-          const cleanTerm = filter.value.replace(/%/g, '').replace(/[\s-]/g, '')
-          if (cleanTerm.length > 2) {
-            searchTerms.add(cleanTerm)
-          }
+          const cleanTerm = filter.value.replace(/%/g, '')
+          const variations = generateSearchVariations(cleanTerm)
+          variations.forEach(v => searchTerms.add(v))
         }
       })
       
       // Also use searchKeywords if provided
       if (searchParams.searchKeywords && Array.isArray(searchParams.searchKeywords)) {
         searchParams.searchKeywords.forEach((keyword: string) => {
-          if (keyword && keyword.length > 2) {
-            searchTerms.add(keyword)
+          if (keyword && keyword.length >= 2) {
+            const variations = generateSearchVariations(keyword)
+            variations.forEach(v => searchTerms.add(v))
           }
         })
       }
       
+      console.log('🔍 Fallback search terms:', Array.from(searchTerms))
+      
       if (searchTerms.size > 0) {
         const fallbackFilters: string[] = []
         Array.from(searchTerms).forEach(term => {
-          fallbackFilters.push(`searchable_text.ilike.%${term}%`)
           fallbackFilters.push(`sku.ilike.%${term}%`)
           fallbackFilters.push(`product_name.ilike.%${term}%`)
-          fallbackFilters.push(`name.ilike.%${term}%`)
+          fallbackFilters.push(`family.ilike.%${term}%`)
         })
         
         let fallbackQuery = supabase
@@ -934,6 +1258,10 @@ Response:
       }
     }
 
+    // ========================================================================
+    // HANDLE NO RESULTS
+    // ========================================================================
+    
     if (!data || data.length === 0) {
       return NextResponse.json({
         success: true,
@@ -946,7 +1274,53 @@ Response:
 
     const cleanedResults = data.map((product: ProductRecord) => cleanProductData(product))
 
-    // Step 4: Handle ANALYTICAL questions
+    // ========================================================================
+    // HANDLE COUNT QUERIES (AFTER FILTERING)
+    // ========================================================================
+
+    if (isCountQuery(query)) {
+      console.log(`🔢 Count query detected - returning count of ${cleanedResults.length} products`)
+      
+      // Get product name/family for context
+      const productContext = searchParams.searchKeywords?.join(', ') || 'matching products'
+      
+      // Get unique families if available
+      const families = new Set<string>()
+      cleanedResults.forEach((p: ProductRecord) => {
+        const family = p.family || p.Family || p.product_family
+        if (family) families.add(family)
+      })
+      
+      const familyList = Array.from(families)
+      const familyText = familyList.length > 0 
+        ? `\n\n**Product Families Found:**\n${familyList.map(f => `• ${f}`).join('\n')}`
+        : ''
+      
+      const limitNote = cleanedResults.length >= 500 
+        ? `\n\n_Note: Showing first 500 results. There may be more products matching your query._`
+        : ''
+      
+      const summary = `**Product Count: ${productContext}**
+
+I found **${cleanedResults.length} product(s)** matching "${productContext}".${familyText}${limitNote}
+
+${cleanedResults.length > 0 ? 'You can view the detailed product list below or refine your search further.' : ''}`
+      
+      return NextResponse.json({
+        success: true,
+        questionType: "count",
+        summary: summary,
+        count: cleanedResults.length,
+        results: cleanedResults.slice(0, 10), // Show first 10 as preview
+        totalResults: cleanedResults.length,
+        families: familyList
+      })
+    }
+
+    // ========================================================================
+    // STEP 4: HANDLE ANALYTICAL QUESTIONS
+    // ========================================================================
+    
     if (searchParams.questionType === "analytical") {
       console.log(`🤖 Analytical mode - generating AI summary from ${cleanedResults.length} products`)
       
@@ -962,7 +1336,10 @@ Response:
       })
     }
 
-    // Step 5: Handle comparison questions - ALWAYS WITH AI ANALYSIS
+    // ========================================================================
+    // STEP 5: HANDLE COMPARISON QUESTIONS
+    // ========================================================================
+    
     if (searchParams.questionType === "comparison") {
       console.log(`🔄 Comparison mode - found ${cleanedResults.length} products`)
       
@@ -987,11 +1364,9 @@ Response:
           ? groupedProducts.slice(0, 2) 
           : cleanedResults.slice(0, 2)
         
-        // Detect comparison type
         const comparisonType = detectComparisonType(productsToCompare)
         console.log(`📊 Comparison type detected: ${comparisonType}`)
         
-        // ALWAYS generate AI analysis for ALL comparisons
         console.log(`🤖 Generating AI comparison analysis`)
         const comparisonSummary = await generateComparisonAnalysis(query, productsToCompare, comparisonType)
         
@@ -1015,7 +1390,10 @@ Response:
       }
     }
 
-    // Step 6: Handle AI-powered specific questions
+    // ========================================================================
+    // STEP 6: HANDLE SPECIFIC AI QUESTIONS
+    // ========================================================================
+    
     if (searchParams.questionType === "specific_ai" && cleanedResults.length > 0) {
       const product = cleanedResults[0]
       const attributeQuestion = searchParams.attributeQuestion || query
@@ -1078,7 +1456,10 @@ ${productDataString}`
       }
     }
 
-    // Default: return cleaned results
+    // ========================================================================
+    // DEFAULT: RETURN CLEANED RESULTS
+    // ========================================================================
+    
     return NextResponse.json({
       success: true,
       questionType: "list",
