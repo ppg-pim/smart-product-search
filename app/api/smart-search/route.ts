@@ -2,9 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { supabase } from '@/lib/supabase'
 import OpenAI from 'openai'
 
-// Add timeout configuration
-export const maxDuration = 60
-
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
@@ -1070,20 +1067,6 @@ Response:
     }
 
     // ========================================================================
-    // OPTIMIZE FOR COUNT QUERIES - ALWAYS APPLY LIMITS
-    // ========================================================================
-
-    if (isCountQuery(query)) {
-      console.log('🔢 Count query detected - applying performance optimizations')
-      searchParams.questionType = "count"
-      
-      if (!searchParams.limit || searchParams.limit > 500) {
-        searchParams.limit = 500
-        console.log('🔢 Limiting count query to 500 results for performance')
-      }
-    }
-
-    // ========================================================================
     // STEP 3: BUILD SUPABASE QUERY
     // ========================================================================
     
@@ -1147,174 +1130,229 @@ Response:
     }
 
     // ========================================================================
-    // APPLY LIMITS FOR PERFORMANCE - ALWAYS ENFORCE LIMITS
+    // APPLY LIMIT & EXECUTE QUERY (except for count queries)
     // ========================================================================
-
-    if (searchParams.questionType === "analytical") {
+    
+    let cleanedResults: ProductRecord[] = []
+    
+    if (!isCountQuery(query)) {
       const limit = searchParams.limit || 100
       dbQuery = dbQuery.limit(limit)
-      console.log(`🔢 Analytical query - limiting to ${limit} products`)
-    } else if (searchParams.questionType === "count") {
-      const limit = searchParams.limit || 500
-      dbQuery = dbQuery.limit(limit)
-      console.log(`🔢 Count query - limiting to ${limit} products`)
-    } else if (searchParams.limit !== undefined && searchParams.limit !== null && searchParams.limit > 0) {
-      dbQuery = dbQuery.limit(searchParams.limit)
-      console.log(`🔢 Applying limit: ${searchParams.limit}`)
-    } else {
-      // Always apply a default limit to prevent timeouts
-      const defaultLimit = 500
-      dbQuery = dbQuery.limit(defaultLimit)
-      console.log(`🔢 Applying default limit: ${defaultLimit} for performance`)
-    }
-
-    let { data, error } = await dbQuery
-
-    if (error) {
-      console.error('❌ Supabase error:', error)
-      throw new Error(`Database error: ${error.message}`)
-    }
-
-    console.log(`✅ Query returned ${data?.length || 0} results`)
-
-    if (data && data.length > 0 && filters) {
-      const beforeFilter = data.length
-      data = filterProductsInMemory(data, filters)
-      console.log(`🔄 In-memory filter: ${beforeFilter} → ${data.length} products`)
-    }
-
-    if (searchParams.questionType === "analytical" && data && data.length > 0 && searchParams.searchKeywords) {
-      console.log(`🎯 Ranking ${data.length} products by relevance...`)
+      console.log(`📊 Applying limit: ${limit}`)
       
-      interface ScoredProduct {
-        product: ProductRecord;
-        score: number;
+      console.log('🔍 Executing database query...')
+      
+      const { data: products, error: queryError } = await dbQuery
+      
+      if (queryError) {
+        console.error('❌ Query error:', queryError)
+        throw new Error(`Database query failed: ${queryError.message}`)
       }
       
-      const scoredProducts: ScoredProduct[] = data.map((product: ProductRecord) => ({
-        product,
-        score: scoreProductRelevance(product, searchParams.searchKeywords)
-      }))
+      console.log(`✅ Found ${products?.length || 0} products`)
       
-      scoredProducts.sort((a: ScoredProduct, b: ScoredProduct) => b.score - a.score)
-      
-      data = scoredProducts.slice(0, 50).map((item: ScoredProduct) => item.product)
-      
-      console.log(`✅ Selected top ${data.length} most relevant products`)
-    }
-
-    // ========================================================================
-    // IMPROVED FALLBACK SEARCH WITH VARIATIONS
-    // ========================================================================
-    
-    if ((!data || data.length === 0) && searchParams.filters.length > 0) {
-      console.log('🔄 No results found, trying fallback search with variations...')
-      
-      const searchTerms = new Set<string>()
-      
-      // Extract and generate variations from filters
-      searchParams.filters.forEach((filter: any) => {
-        if (filter.value) {
-          const cleanTerm = filter.value.replace(/%/g, '')
-          const variations = generateSearchVariations(cleanTerm)
-          variations.forEach(v => searchTerms.add(v))
-        }
-      })
-      
-      // Also use searchKeywords if provided
-      if (searchParams.searchKeywords && Array.isArray(searchParams.searchKeywords)) {
-        searchParams.searchKeywords.forEach((keyword: string) => {
-          if (keyword && keyword.length >= 2) {
-            const variations = generateSearchVariations(keyword)
-            variations.forEach(v => searchTerms.add(v))
-          }
-        })
+      // Apply in-memory filters if needed
+      let filteredProducts = products || []
+      if (filters && (filters.family || filters.productType || filters.specification)) {
+        const beforeFilter = filteredProducts.length
+        filteredProducts = filterProductsInMemory(filteredProducts, filters)
+        console.log(`🔍 In-memory filter: ${beforeFilter} → ${filteredProducts.length} products`)
       }
       
-      console.log('🔍 Fallback search terms:', Array.from(searchTerms))
+      // Clean and score products
+      cleanedResults = filteredProducts.map((p: any) => cleanProductData(p))
       
-      if (searchTerms.size > 0) {
-        const fallbackFilters: string[] = []
-        Array.from(searchTerms).forEach(term => {
-          fallbackFilters.push(`sku.ilike.%${term}%`)
-          fallbackFilters.push(`product_name.ilike.%${term}%`)
-          fallbackFilters.push(`family.ilike.%${term}%`)
-        })
+      // Score and sort by relevance if we have search keywords
+      if (searchParams.searchKeywords && searchParams.searchKeywords.length > 0) {
+        cleanedResults = cleanedResults
+          .map((p: ProductRecord) => ({
+            ...p,
+            _relevanceScore: scoreProductRelevance(p, searchParams.searchKeywords)
+          }))
+          .sort((a: any, b: any) => b._relevanceScore - a._relevanceScore)
+          .map((p: any) => {
+            const { _relevanceScore, ...rest } = p
+            return rest
+          })
         
-        let fallbackQuery = supabase
-          .from('products')
-          .select('*')
-          .or(fallbackFilters.join(','))
-          .limit(100)
-        
-        fallbackQuery = applyUserFilters(fallbackQuery, filters, columns, [])
-        
-        const fallbackResult = await fallbackQuery
-        
-        if (!fallbackResult.error && fallbackResult.data && fallbackResult.data.length > 0) {
-          console.log(`✅ Fallback search found ${fallbackResult.data.length} results`)
-          data = filterProductsInMemory(fallbackResult.data, filters)
-        }
+        console.log(`✅ Sorted ${cleanedResults.length} products by relevance`)
       }
     }
 
     // ========================================================================
-    // HANDLE NO RESULTS
-    // ========================================================================
-    
-    if (!data || data.length === 0) {
-      return NextResponse.json({
-        success: true,
-        questionType: "list",
-        results: [],
-        count: 0,
-        message: "No products found matching your query. Try using different keywords or partial product names."
-      })
-    }
-
-    const cleanedResults = data.map((product: ProductRecord) => cleanProductData(product))
-
-    // ========================================================================
-    // HANDLE COUNT QUERIES (AFTER FILTERING)
+    // OPTIMIZE FOR COUNT QUERIES - USE SUPABASE COUNT
     // ========================================================================
 
     if (isCountQuery(query)) {
-      console.log(`🔢 Count query detected - returning count of ${cleanedResults.length} products`)
+      console.log('🔢 Count query detected - using Supabase count feature')
+      searchParams.questionType = "count"
       
-      // Get product name/family for context
-      const productContext = searchParams.searchKeywords?.join(', ') || 'matching products'
+      // Build count query with timeout protection
+      const countPromise = (async () => {
+        let countQuery: any = supabase
+          .from('products')
+          .select('*', { count: 'exact', head: true })
+        
+        // Apply user filters
+        countQuery = applyUserFilters(countQuery, filters, columns, [])
+        
+        // Apply search filters
+        if (searchParams.filters.length > 0) {
+          if (searchParams.searchType === "any") {
+            const orConditionString = buildOrConditions(searchParams.filters, columns)
+            if (orConditionString) {
+              countQuery = countQuery.or(orConditionString)
+              console.log('✅ OR conditions applied for count:', orConditionString)
+            }
+          } else {
+            const validFilters = searchParams.filters.filter((filter: any) => 
+              columns.includes(filter.column)
+            )
+            
+            for (const filter of validFilters) {
+              const { column, operator, value } = filter
+              
+              switch (operator) {
+                case 'eq':
+                  countQuery = countQuery.eq(column, value)
+                  break
+                case 'ilike':
+                  countQuery = countQuery.ilike(column, value)
+                  break
+                case 'gt':
+                  countQuery = countQuery.gt(column, value)
+                  break
+                case 'lt':
+                  countQuery = countQuery.lt(column, value)
+                  break
+                case 'gte':
+                  countQuery = countQuery.gte(column, value)
+                  break
+                case 'lte':
+                  countQuery = countQuery.lte(column, value)
+                  break
+              }
+            }
+          }
+        }
+        
+        return await countQuery
+      })()
       
-      // Get unique families if available
-      const families = new Set<string>()
-      cleanedResults.forEach((p: ProductRecord) => {
-        const family = p.family || p.Family || p.product_family
-        if (family) families.add(family)
-      })
+      // Add timeout (30 seconds)
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Count query timeout')), 30000)
+      )
       
-      const familyList = Array.from(families)
-      const familyText = familyList.length > 0 
-        ? `\n\n**Product Families Found:**\n${familyList.map(f => `• ${f}`).join('\n')}`
-        : ''
-      
-      const limitNote = cleanedResults.length >= 500 
-        ? `\n\n_Note: Showing first 500 results. There may be more products matching your query._`
-        : ''
-      
-      const summary = `**Product Count: ${productContext}**
+      try {
+        const { count, error: countError } = await Promise.race([countPromise, timeoutPromise]) as any
+        
+        if (countError) {
+          console.error('❌ Count query error:', countError)
+          throw new Error(`Count error: ${countError.message}`)
+        }
+        
+        console.log(`✅ Total count: ${count}`)
+        
+        // =====================================================================
+        // FETCH ALL MATCHING PRODUCTS (handle pagination for > 1000 results)
+        // =====================================================================
+        
+        const maxResults = Math.min(count || 0, 3000) // Cap at 3000 for performance
+        const batchSize = 1000 // Supabase max per request
+        let allProducts: any[] = []
+        
+        // Calculate number of batches needed
+        const numBatches = Math.ceil(maxResults / batchSize)
+        
+        console.log(`📦 Fetching ${maxResults} products in ${numBatches} batch(es)...`)
+        
+        // Fetch in batches
+        for (let i = 0; i < numBatches; i++) {
+          const offset = i * batchSize
+          const limit = Math.min(batchSize, maxResults - offset)
+          
+          let batchQuery = supabase.from('products').select('*')
+          batchQuery = applyUserFilters(batchQuery, filters, columns, [])
+          
+          if (searchParams.filters.length > 0 && searchParams.searchType === "any") {
+            const orConditionString = buildOrConditions(searchParams.filters, columns)
+            if (orConditionString) {
+              batchQuery = batchQuery.or(orConditionString)
+            }
+          }
+          
+          // Apply pagination
+          batchQuery = batchQuery.range(offset, offset + limit - 1)
+          
+          const { data: batchData, error: fetchError } = await batchQuery
+          
+          if (fetchError) {
+            console.error(`❌ Error fetching batch ${i + 1}:`, fetchError)
+            throw new Error(`Fetch error: ${fetchError.message}`)
+          }
+          
+          if (batchData && batchData.length > 0) {
+            allProducts = allProducts.concat(batchData)
+            console.log(`✅ Fetched batch ${i + 1}/${numBatches}: ${batchData.length} products (total: ${allProducts.length})`)
+          }
+          
+          // Stop if we got fewer results than expected (no more data)
+          if (!batchData || batchData.length < limit) {
+            break
+          }
+        }
+        
+        console.log(`✅ Total fetched: ${allProducts.length} products`)
+        
+        // Clean the products
+        cleanedResults = allProducts.map((p: any) => cleanProductData(p))
+        
+        // Get unique families for summary
+        const families = new Set<string>()
+        cleanedResults.forEach((p: any) => {
+          const family = p.family || p.Family || p.product_family
+          if (family) families.add(family)
+        })
+        
+        const familyList = Array.from(families).slice(0, 10) // Show top 10 families
+        const productContext = searchParams.searchKeywords?.join(', ') || 'matching products'
+        
+        const familyText = familyList.length > 0 
+          ? `\n\n**Product Families Found:**\n${familyList.map(f => `• ${f}`).join('\n')}${families.size > 10 ? `\n_...and ${families.size - 10} more families_` : ''}`
+          : ''
+        
+        const limitWarning = count && count > maxResults 
+          ? `\n\n⚠️ **Note:** Showing first ${maxResults.toLocaleString()} results for performance. Use filters to narrow down your search.`
+          : ''
+        
+        const summary = `**Product Count: ${productContext}**
 
-I found **${cleanedResults.length} product(s)** matching "${productContext}".${familyText}${limitNote}
+I found **${(count || 0).toLocaleString()} product(s)** matching "${productContext}".${familyText}${limitWarning}
 
-${cleanedResults.length > 0 ? 'You can view the detailed product list below or refine your search further.' : ''}`
-      
-      return NextResponse.json({
-        success: true,
-        questionType: "count",
-        summary: summary,
-        count: cleanedResults.length,
-        results: cleanedResults.slice(0, 10), // Show first 10 as preview
-        totalResults: cleanedResults.length,
-        families: familyList
-      })
+You can view all ${cleanedResults.length.toLocaleString()} products in the results table below.`
+        
+        return NextResponse.json({
+          success: true,
+          questionType: "count",
+          summary: summary,
+          count: count || 0,
+          results: cleanedResults,
+          totalResults: count || 0,
+          displayedResults: cleanedResults.length,
+          families: Array.from(families),
+          limitApplied: count && count > maxResults
+        })
+        
+      } catch (timeoutError: any) {
+        console.error('❌ Query timeout:', timeoutError)
+        
+        return NextResponse.json({
+          success: false,
+          error: 'Query took too long to execute. Please try a more specific search or use filters.',
+          timeout: true
+        }, { status: 408 })
+      }
     }
 
     // ========================================================================
