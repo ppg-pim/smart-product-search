@@ -9,234 +9,6 @@ const openai = new OpenAI({
 type ProductRecord = Record<string, any>
 
 // ============================================================================
-// SMART AI SYSTEM PROMPT - Flexible Field Discovery
-// ============================================================================
-
-function getSmartAISystemPrompt(): string {
-  return `You are an expert aerospace sealants and coatings consultant with deep technical knowledge.
-
-**YOUR ROLE:**
-You will receive product data from a sealants database. Your job is to:
-1. **Analyze the data structure** - Understand what fields are available
-2. **Extract relevant information** - Find the answer to the user's question
-3. **Provide clear, accurate answers** - Based ONLY on the data provided
-
-**HOW TO ANSWER:**
-
-- **For specific questions** (e.g., "what is the cure time of PS 870"):
-  → Search through ALL fields in the product data
-  → Find fields that contain relevant information (e.g., "Cure_Time", "Curing", "Dry_Time")
-  → Extract and present the exact values
-  → If multiple related fields exist, show all of them
-  
-- **For comparison questions**:
-  → **IMPORTANT: Use a clean, scannable format**
-  → Start with a brief summary of key differences
-  → Then show detailed comparison in sections
-  → **DO NOT use wide tables** - they're hard to read
-  → Use **side-by-side format** for 2 products
-  → Use **grouped sections** for clarity
-  → Highlight differences in **bold**
-  → Show similarities briefly at the end
-  
-- **For "best for" questions** (e.g., "best sealant for firewall"):
-  → Analyze application fields (Application, Use, Features, Benefits)
-  → Look for specification matches (temperature, resistance, certifications)
-  → Rank products by relevance to the specific use case
-  → Explain WHY each product is suitable
-  
-- **For general questions**:
-  → Provide an overview of key product characteristics
-  → Focus on the most important/relevant fields
-  → Explain technical specifications in context
-
-**IMPORTANT RULES:**
-1. **Don't assume field names** - The database structure may vary
-2. **Search intelligently** - Look for keywords in field names:
-   - Mix/ratio/mixing → mixing instructions
-   - Cure/curing/dry → curing information
-   - Temp/temperature → temperature specs
-   - Apply/application → usage information
-   - Spec/specification → technical specs
-3. **Be thorough** - Check all fields, not just obvious ones
-4. **Use natural field names** - Convert underscores to spaces (e.g., "Cure Time" not "Cure_Time")
-5. **If data is missing** - Clearly state "This information is not available in the product data"
-6. **Be precise** - Use exact values from the data, don't estimate or extrapolate
-7. **Context matters** - For aerospace products, always consider:
-   - Safety certifications (MIL-SPEC, FAA, etc.)
-   - Temperature ranges (operating conditions)
-   - Chemical resistance (fuel, hydraulic fluid, etc.)
-   - Application method (brush, spray, etc.)
-
-**FORMATTING:**
-- Use markdown for readability
-- Use **bold** for important specifications and differences
-- **NEVER use wide tables for comparisons** - they're unreadable
-- Use side-by-side format for 2-product comparisons
-- Use grouped sections for multi-product comparisons
-- Use dashes (-) for all lists, NOT bullet points (•)
-- Keep answers concise but complete
-- When citing field sources, use natural language (e.g., "according to the Cure Time specification" not "from Cure_Time field")
-
-**AEROSPACE-SPECIFIC GUIDANCE:**
-When recommending products for specific applications:
-- **Firewall sealants**: Look for high temperature resistance (500°F+), flame resistance
-- **Fuel tank sealants**: Look for fuel resistance, MIL-S-8802 or similar specs
-- **Pressurized cabin**: Look for flexibility, adhesion, pressure resistance
-- **Corrosion protection**: Look for primers, corrosion inhibitors
-- **General purpose**: Look for versatility, ease of application
-
-**COMPARISON FORMAT (2 PRODUCTS) - USE THIS TEMPLATE:**
-
-**Quick Summary:**
-[Brief 1-2 sentence overview of main differences]
-
-**Key Differences:**
-
-🔹 **[Specification Name]**
-- Product A: [value]
-- Product B: [value]
-
-🔹 **[Specification Name]**
-- Product A: [value]
-- Product B: [value]
-
----
-
-**Detailed Specifications:**
-
-**Product 1: [Name/SKU]**
-- Color: [value]
-- Specification: [value]
-- Pot Life: [value]
-- Cure Time: [value]
-- Temperature Range: [value]
-- [other key specs...]
-
-**Product 2: [Name/SKU]**
-- Color: [value]
-- Specification: [value]
-- Pot Life: [value]
-- Cure Time: [value]
-- Temperature Range: [value]
-- [other key specs...]
-
----
-
-**Similarities:**
-- [List common specifications]
-
-**Recommendation:**
-[When to use each product based on the differences]
-
----
-
-**EXAMPLE COMPARISON (GOOD FORMAT):**
-
-User: "Compare 0821X404XXCAZ05K vs 0821X404XX5PZ05K"
-
-Good Answer:
-"**Comparison: PPG KOROTHERM™ Thermal Protective Coating**
-
-**Quick Summary:**
-Both are identical KOROTHERM thermal protective coatings in 5 oz kits. The **only difference** is the specification standard: one meets PRC STANDARD while the other meets 5PTMMG01.
-
----
-
-**Key Difference:**
-
-🔹 **Specification Standard**
-- **0821X404XXCAZ05K**: PRC STANDARD
-- **0821X404XX5PZ05K**: 5PTMMG01
-
-*(This may indicate different approval requirements or customer specifications)*
-
----
-
-**Shared Specifications:**
-
-**Product Details:**
-- Product Type: Thermal Protective Coating
-- Color: Whitish Gray
-- Packaging: KIT, 5.00 oz Can
-- Shelf Life: Store at 40°F (4.4°C)
-
-**Application Properties:**
-- Pot Life: 10 to 20 minutes
-- Dry Hard: 90 to 120 minutes at 75°F (23.9°C)
-- Full Cure: 7 days at 75°F (23.9°C)
-- Mixing Ratio: 4 parts Base : 1 part Activator (by volume)
-- Viscosity: 120 to 250 poise
-
-**Performance:**
-- Temperature Range: -65°F to +2,000°F (-54°C to +1,093°C)
-- Flame Exposure: Backside temperature remains below 550°F (288°C)
-- Humidity Resistance: 500 hours - Conforms
-- Theoretical Coverage: 1400 ft²/gal at 1.0 mil dry film
-- Dry Film Density: 0.0065 lbs/ft² at 1.0 mil
-
----
-
-**Recommendation:**
-Both products offer identical performance characteristics. Choose based on:
-- **0821X404XXCAZ05K** if you need PRC STANDARD compliance
-- **0821X404XX5PZ05K** if you need 5PTMMG01 compliance
-
-Check with your engineering/quality department to determine which specification is required for your application."
-
----
-
-**EXAMPLE FOR 3+ PRODUCTS:**
-
-User: "Compare PS 870 Class A, Class B, and Class C"
-
-Good Answer:
-"**Comparison: PS 870 Sealant Family**
-
-**Quick Summary:**
-All three are PS 870 sealants meeting MIL-S-8802 specification. Main differences are color, density, and intended application.
-
----
-
-**Key Differences:**
-
-🔹 **Color**
-- Class A: **White** (easy to inspect)
-- Class B: **Black** (fuel system standard)
-- Class C: **Gray** (general purpose)
-
-🔹 **Specific Gravity**
-- Class A: 1.35
-- Class B: **1.45** (denser)
-- Class C: 1.40
-
-🔹 **Primary Application**
-- Class A: General airframe sealing, visible areas
-- Class B: **Fuel tank and fuel system sealing**
-- Class C: General purpose, intermediate visibility
-
----
-
-**Shared Specifications:**
-- Temperature Range: -65°F to 250°F
-- Cure Time: 7 days at 77°F
-- Specification: MIL-S-8802
-- Application Methods: Brush, extrusion, spatula
-- Tack Free Time: 1-2 hours at 77°F
-
----
-
-**Recommendation:**
-- Use **Class A** for general airframe where white color helps with inspection
-- Use **Class B** for all fuel system applications (required by spec)
-- Use **Class C** when color is less critical but you need general sealing"
-
----
-
-Remember: Your goal is to make comparisons **easy to scan and understand**. Avoid wide tables. Use clear sections and highlight what actually matters to the user.`
-}
-
-// ============================================================================
 // HELPER: Generate search variations for product codes
 // ============================================================================
 
@@ -416,11 +188,11 @@ ${count && count > 100 ? 'You can use filters or search for specific products to
       const summary = `**Product Categories Overview**
 
 **Product Families (${families.length} total):**
-${families.slice(0, 20).map(f => `- ${f}`).join('\n')}
+${families.slice(0, 20).map(f => `• ${f}`).join('\n')}
 ${families.length > 20 ? `\n_...and ${families.length - 20} more_` : ''}
 
 **Product Types (${types.length} total):**
-${types.slice(0, 15).map(t => `- ${t}`).join('\n')}
+${types.slice(0, 15).map(t => `• ${t}`).join('\n')}
 ${types.length > 15 ? `\n_...and ${types.length - 15} more_` : ''}
 
 You can filter by any of these categories using the filter options in the search interface.`
@@ -450,23 +222,23 @@ You can filter by any of these categories using the filter options in the search
       
       const families = [...new Set(familyData?.map((r: any) => r.family).filter(Boolean))]
       
-      const summary = `**Aerospace Sealants Database Overview**
+      const summary = `**Aerospace Products Database Overview**
 
-**Total Products:** ${(count || 0).toLocaleString()} aerospace sealant products
+**Total Products:** ${(count || 0).toLocaleString()} aerospace products
 
 **Product Families:** ${families.length} unique families including ${families.slice(0, 5).join(', ')}, and more.
 
 **Search Capabilities:**
-- Natural language search across all product specifications
-- Compare products side-by-side
-- Filter by family, type, and specification
-- AI-powered product recommendations
+• Natural language search across all product specifications
+• Compare products side-by-side
+• Filter by family, type, and specification
+• AI-powered product recommendations
 
 **Example Queries:**
-- "Best sealant for firewall application"
-- "Compare PS 870 vs PR 1422"
-- "Show me all primers"
-- "What products are in the Korotherm family?"`
+• "Best sealant for firewall application"
+• "Compare PS 870 vs PR 1422"
+• "Show me all primers"
+• "What products are in the Korotherm family?"`
       
       return {
         success: true,
@@ -637,229 +409,163 @@ function scoreProductRelevance(product: ProductRecord, keywords: string[]): numb
 }
 
 // ============================================================================
-// COMPLETE DATA PREPARATION - Send Everything to AI
+// AI HELPER FUNCTIONS
 // ============================================================================
 
-function prepareCompleteProductDataForAI(products: ProductRecord[]): string {
-  const productDataStrings = products.map((product, index) => {
-    const lines: string[] = []
-    lines.push(`\n${'='.repeat(80)}`)
-    lines.push(`PRODUCT ${index + 1}`)
-    lines.push('='.repeat(80))
+function truncateProductForAI(product: ProductRecord, maxLength: number = 3000): string {
+  let result = JSON.stringify(product, null, 2)
+  
+  if (result.length > maxLength) {
+    const priorityFields = ['sku', 'product_name', 'name', 'description', 'color', 'colour', 'family', 'specification', 'product_type', 'application', 'use', 'features', 'benefits', 'temperature', 'resistance']
+    const truncated: ProductRecord = {}
     
-    // Send ALL fields to AI - let it discover what's relevant
-    Object.entries(product).forEach(([key, value]) => {
-      // Skip only truly irrelevant fields
-      if (key === 'embedding' || key === 'id' || key === 'created_at') {
-        return
-      }
-      
-      if (value !== null && value !== undefined && value !== '') {
-        // Convert field name to human-readable format
-        const readableKey = key
-          .replace(/_/g, ' ')
-          .replace(/([A-Z])/g, ' $1')
-          .trim()
-          .replace(/\s+/g, ' ')
-        
-        // Limit individual field length but keep complete
-        const valueStr = String(value).substring(0, 2000)
-        lines.push(`${readableKey}: ${valueStr}`)
+    priorityFields.forEach(field => {
+      if (product[field]) {
+        truncated[field] = product[field]
       }
     })
     
-    // Also include all_attributes if present (already merged in cleanProductData)
+    Object.keys(product).forEach(key => {
+      if (!priorityFields.includes(key)) {
+        const testResult = JSON.stringify({ ...truncated, [key]: product[key] })
+        if (testResult.length < maxLength) {
+          truncated[key] = product[key]
+        }
+      }
+    })
     
-    return lines.join('\n')
-  })
+    result = JSON.stringify(truncated, null, 2)
+  }
   
-  return productDataStrings.join('\n\n')
+  return result
 }
 
-// ============================================================================
-// SMART AI ANALYSIS - Flexible & Adaptive
-// ============================================================================
-
-async function generateSmartAISummary(
-  query: string, 
-  products: ProductRecord[],
-  questionType: 'list' | 'count' | 'specific_ai' | 'comparison' | 'analytical' = 'analytical'
-): Promise<string> {
+async function generateAISummary(query: string, products: ProductRecord[]): Promise<string> {
   try {
-    // Limit products to avoid token limits
-    const productsToAnalyze = products.slice(0, 10)
-    const completeProductData = prepareCompleteProductDataForAI(productsToAnalyze)
+    const productsData = products.slice(0, 25).map(p => truncateProductForAI(p, 2000))
+    const combinedData = productsData.join('\n\n---\n\n')
     
-    // Estimate tokens (rough: 1 token ≈ 4 characters)
-    const estimatedTokens = completeProductData.length / 4
-    
-    console.log(`🤖 Generating Smart AI summary:`)
-    console.log(`   - Products: ${productsToAnalyze.length}`)
-    console.log(`   - Data size: ${completeProductData.length} chars`)
-    console.log(`   - Est. tokens: ${Math.round(estimatedTokens)}`)
-    console.log(`   - Question type: ${questionType}`)
-    
-    // If data is too large, reduce products
-    if (estimatedTokens > 25000) {
-      console.warn(`⚠️ Data too large (${estimatedTokens} tokens), reducing to 5 products`)
-      return await generateSmartAISummary(query, products.slice(0, 5), questionType)
+    const estimatedTokens = combinedData.length / 4
+    if (estimatedTokens > 20000) {
+      console.warn(`⚠️ Data too large (${estimatedTokens} tokens), reducing to top 15 products`)
+      return await generateAISummary(query, products.slice(0, 15))
     }
     
-    // Create context hint based on question type
-    let contextHint = ''
-    if (questionType === 'comparison') {
-      contextHint = '\n\n**USER INTENT:** The user wants to compare these products. Focus on finding differences and similarities. Use a comparison table if comparing 3+ specifications.'
-    } else if (questionType === 'analytical' || questionType === 'specific_ai') {
-      contextHint = '\n\n**USER INTENT:** The user is asking an analytical question. Provide detailed insights, recommendations, and explain WHY certain products are suitable.'
-    } else if (questionType === 'list') {
-      contextHint = '\n\n**USER INTENT:** The user is looking up product information. Provide a clear, informative overview of the product(s).'
-    } else if (questionType === 'count') {
-      contextHint = '\n\n**USER INTENT:** The user wants to know how many products match certain criteria. Provide the count and summarize the product range.'
-    }
+    console.log(`🤖 Generating AI summary from ${products.length} products (${combinedData.length} chars)`)
     
     const summaryCompletion = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
         {
           role: 'system',
-          content: getSmartAISystemPrompt()
+          content: `You are an expert aerospace product consultant specializing in sealants and related products. 
+
+Your task is to provide comprehensive, insightful answers based on the product data provided.
+
+GUIDELINES:
+- Provide a clear, well-structured answer that directly addresses the user's question
+- Use specific product details and technical specifications as evidence
+- Explain WHY certain products are used (applications, benefits, specifications)
+- When asked about "best" products, analyze ALL products and recommend based on:
+  * Specific application requirements (e.g., firewall, fuel tank, pressurized cabin)
+  * Technical specifications that match the use case
+  * Industry standards and certifications
+  * Performance characteristics
+- Compare products when relevant and explain trade-offs
+- Provide recommendations based on use cases
+- Use bullet points for clarity when listing features or benefits
+- Include technical specifications that support your explanation
+- Be conversational but professional
+- If asking about a product family, discuss the range of products and their differences
+- Always cite specific product names/SKUs when making claims
+- If multiple products are suitable, list them ALL with their specific advantages
+
+FORMAT YOUR RESPONSE:
+1. **Direct Answer** - Start with a clear answer to the question
+2. **Recommended Products** - List specific products with SKUs
+3. **Key Benefits/Features** - Explain why each product is suitable
+4. **Technical Details** - Include relevant specifications
+5. **Applications** - Explain where/how it's used
+6. **Comparison** - If multiple options, explain differences and when to use each
+
+PRODUCT DATA (${products.length} products analyzed):
+${combinedData}`
         },
         {
           role: 'user',
-          content: `${contextHint}
-
-**USER QUESTION:**
-${query}
-
-**PRODUCT DATA:**
-${completeProductData}
-
-Please analyze the product data above and answer the user's question. Remember to:
-1. Search through ALL fields to find relevant information
-2. When citing field names, convert underscores to spaces naturally
-3. Use dashes (-) for all lists, NOT bullet points (•)
-4. Be specific and accurate - use exact values from the data
-5. If information doesn't exist in the data, say so clearly
-6. For "best for" questions, analyze ALL products and rank by suitability
-7. Explain your reasoning with technical justification`
+          content: query
         }
       ],
-      temperature: 0.2, // Lower temperature for factual accuracy
-      max_tokens: 2500
+      temperature: 0.3,
+      max_tokens: 2000
     })
     
     let summary = summaryCompletion.choices[0].message.content || 'Unable to generate summary'
-    
-    // Clean up any remaining HTML
     summary = stripHtml(summary)
     
-    console.log(`✅ Smart AI summary generated (${summary.length} chars)`)
-    
     return summary
-    
   } catch (error: any) {
-    console.error('❌ Smart AI summary generation error:', error.message)
+    console.error('❌ AI summary generation error:', error.message)
     
-    // Retry with fewer products if token error
-    if (error.message?.includes('tokens') && products.length > 5) {
+    if (error.message?.includes('tokens') && products.length > 10) {
       console.log('🔄 Retrying with fewer products...')
-      return await generateSmartAISummary(query, products.slice(0, 5), questionType)
+      return await generateAISummary(query, products.slice(0, 10))
     }
     
-    // Fallback response
-    return `I found ${products.length} product(s) matching your search. Here are the key details:
-
-${products.slice(0, 3).map((p, i) => `
-**${i + 1}. ${p.product_name || p.name || p.sku || 'Product'}**
-${p.description ? `- ${stripHtml(String(p.description)).substring(0, 200)}...` : ''}
-${p.family ? `- Family: ${p.family}` : ''}
-${p.specification ? `- Specification: ${p.specification}` : ''}
-`).join('\n')}
-
-${products.length > 3 ? `\n_...and ${products.length - 3} more products_` : ''}
-
-Please review the detailed product information below for complete specifications.`
+    return 'Unable to generate AI summary at this time. Please review the product details below.'
   }
 }
 
-// ============================================================================
-// SMART COMPARISON ANALYSIS
-// ============================================================================
-
-async function generateSmartComparisonAnalysis(
-  query: string, 
-  products: ProductRecord[], 
-  comparisonType: string
-): Promise<string> {
+async function generateComparisonAnalysis(query: string, products: ProductRecord[], comparisonType: string): Promise<string> {
   try {
-    const productsData = prepareCompleteProductDataForAI(products)
+    const productsData = products.map(p => truncateProductForAI(p, 3000))
+    const combinedData = productsData.join('\n\n---\n\n')
     
-    console.log(`🤖 Generating smart comparison analysis:`)
-    console.log(`   - Products: ${products.length}`)
-    console.log(`   - Comparison type: ${comparisonType}`)
-    console.log(`   - Data size: ${productsData.length} chars`)
+    console.log(`🤖 Generating comparison analysis (type: ${comparisonType})`)
     
     const comparisonCompletion = await openai.chat.completions.create({
       model: 'gpt-4o',
       messages: [
         {
           role: 'system',
-          content: getSmartAISystemPrompt()
+          content: `You are an expert aerospace product consultant. You are comparing ${products.length} products.
+
+COMPARISON TYPE: ${comparisonType}
+
+Your task is to provide a detailed comparison analysis highlighting:
+1. **Key Differences** - What makes each product unique
+2. **Similarities** - What they have in common
+3. **Use Cases** - When to use each product
+4. **Technical Distinctions** - Important specification differences
+5. **Recommendations** - Which product is best for specific applications
+
+GUIDELINES:
+- Be specific and cite actual product names/SKUs
+- Highlight the most important differences first
+- Explain WHY the differences matter
+- Use bullet points for clarity
+- Be concise but comprehensive
+- Focus on practical implications for users
+
+PRODUCTS TO COMPARE:
+${combinedData}`
         },
         {
           role: 'user',
-          content: `**USER INTENT:** The user wants to compare these ${products.length} products.
-
-**COMPARISON TYPE:** ${comparisonType}
-
-**USER QUESTION:**
-${query}
-
-**PRODUCTS TO COMPARE:**
-${productsData}
-
-Please provide a detailed comparison analysis:
-1. **Create a comparison table** for key specifications (if 3+ specs to compare)
-2. **Highlight key differences** - What makes each product unique
-3. **Note similarities** - What they have in common
-4. **Explain use cases** - When to use each product
-5. **Make recommendations** - Which product is best for specific applications
-
-Remember:
-- Search through ALL fields to find comparable data
-- Use natural field names (spaces, not underscores)
-- Use dashes (-) for lists
-- Be specific and cite actual values
-- Explain WHY differences matter for the end user`
+          content: query
         }
       ],
-      temperature: 0.2,
-      max_tokens: 2000
+      temperature: 0.3,
+      max_tokens: 1500
     })
     
-    let analysis = comparisonCompletion.choices[0].message.content || 'Unable to generate comparison'
+    let analysis = comparisonCompletion.choices[0].message.content || 'Unable to generate comparison analysis'
     analysis = stripHtml(analysis)
     
-    console.log(`✅ Smart comparison analysis generated (${analysis.length} chars)`)
-    
     return analysis
-    
   } catch (error: any) {
-    console.error('❌ Smart comparison analysis error:', error.message)
-    
-    // Fallback comparison
-    return `**Product Comparison**
-
-I found ${products.length} products to compare. Here's a basic overview:
-
-${products.map((p, i) => `
-**${i + 1}. ${p.product_name || p.name || p.sku || 'Product'}**
-- Family: ${p.family || 'N/A'}
-- Type: ${p.product_type || 'N/A'}
-- Specification: ${p.specification || 'N/A'}
-`).join('\n')}
-
-Please review the detailed comparison table below for complete specifications.`
+    console.error('❌ Comparison analysis error:', error.message)
+    return 'Unable to generate comparison analysis at this time. Please review the comparison table below.'
   }
 }
 
@@ -1173,7 +879,7 @@ export async function POST(request: NextRequest) {
       messages: [
         {
           role: 'system',
-          content: `You are a smart database search assistant for aerospace sealant products. Analyze user queries and generate appropriate database filters.
+          content: `You are a smart database search assistant for aerospace products. Analyze user queries and generate appropriate database filters.
 
 DATABASE SCHEMA:
 Columns: ${columns.join(', ')}
@@ -1610,106 +1316,35 @@ Response:
         })
         
         const familyList = Array.from(families).slice(0, 10) // Show top 10 families
-        const productContext = searchParams.searchKeywords?.join(', ') || 'in the system'
+        const productContext = searchParams.searchKeywords?.join(', ') || 'matching products'
         
         const familyText = familyList.length > 0 
-          ? `\n\n**Product Families Found:**\n${familyList.map(f => `- ${f}`).join('\n')}${families.size > 10 ? `\n_...and ${families.size - 10} more families_` : ''}`
+          ? `\n\n**Product Families Found:**\n${familyList.map(f => `• ${f}`).join('\n')}${families.size > 10 ? `\n_...and ${families.size - 10} more families_` : ''}`
           : ''
         
         const limitWarning = count && count > maxResults 
-          ? `\n\n⚠️ **Note:** The table below shows the first ${maxResults.toLocaleString()} results for performance. Use filters to narrow down your search if you need specific products.`
+          ? `\n\n⚠️ **Note:** Showing first ${maxResults.toLocaleString()} results for performance. Use filters to narrow down your search.`
           : ''
         
-        // FIX: Use 'count' (actual total) instead of cleanedResults.length
-        const totalCount = count || 0
-        const displayedCount = cleanedResults.length
+        const summary = `**Product Count: ${productContext}**
+
+I found **${(count || 0).toLocaleString()} product(s)** matching "${productContext}".${familyText}${limitWarning}
+
+You can view all ${cleanedResults.length.toLocaleString()} products in the results table below.`
         
-        // =====================================================================
-        // GENERATE AI ANALYSIS FOR COUNT QUERY
-        // =====================================================================
+        return NextResponse.json({
+          success: true,
+          questionType: "count",
+          summary: summary,
+          count: count || 0,
+          results: cleanedResults,
+          totalResults: count || 0,
+          displayedResults: cleanedResults.length,
+          families: Array.from(families),
+          limitApplied: count && count > maxResults
+        })
         
-        console.log('🤖 Generating AI analysis for count query...')
-        
-        const contextForAI = `The user asked: "${query}"
-
-TOTAL PRODUCTS: ${totalCount.toLocaleString()}
-
-PRODUCT FAMILIES (${families.size} total):
-${familyList.map(f => `- ${f}`).join('\n')}${families.size > 10 ? `\n...and ${families.size - 10} more families` : ''}
-
-SAMPLE PRODUCTS (first 5 for reference):
-${JSON.stringify(cleanedResults.slice(0, 5), null, 2)}
-
-Please provide a clear, informative answer about the total product count and give an overview of what types of products are available.`
-
-        try {
-          const aiCompletion = await openai.chat.completions.create({
-            model: 'gpt-4o',
-            messages: [
-              {
-                role: 'system',
-                content: getSmartAISystemPrompt()
-              },
-              {
-                role: 'user',
-                content: contextForAI
-              }
-            ],
-            temperature: 0.2,
-            max_tokens: 1500
-          })
-
-          let aiSummary = aiCompletion.choices[0].message.content || 'Unable to generate summary'
-          aiSummary = stripHtml(aiSummary)
-          
-          console.log('✅ AI analysis generated for count query')
-
-          return NextResponse.json({
-            success: true,
-            questionType: "count",
-            summary: aiSummary,  // ✅ AI-generated summary
-            count: totalCount,
-            results: cleanedResults,
-            totalResults: totalCount,
-            displayedResults: displayedCount,
-            families: Array.from(families),
-            limitApplied: totalCount > maxResults,
-            metadata: {
-              totalCount: totalCount,
-              displayedCount: displayedCount,
-              familyCount: families.size
-            }
-          })
-          
-        } catch (aiError: any) {
-          console.error('❌ AI Error for count query:', aiError)
-          
-          // Fallback to template if AI fails
-          const fallbackSummary = `**Product Count**
-
-I found **${totalCount.toLocaleString()} product(s)** in the system.
-
-**Product Families Found (${families.size} total):**
-${familyList.map(f => `- ${f}`).join('\n')}${families.size > 10 ? `\n_...and ${families.size - 10} more families_` : ''}
-
-${displayedCount < totalCount ? `⚠️ **Note:** The table below shows the first ${displayedCount.toLocaleString()} results for performance. Use filters to narrow down your search if you need specific products.` : ''}
-
-You can view all products in the results table below.`
-
-          return NextResponse.json({
-            success: true,
-            questionType: "count",
-            summary: fallbackSummary,
-            count: totalCount,
-            results: cleanedResults,
-            totalResults: totalCount,
-            displayedResults: displayedCount,
-            families: Array.from(families),
-            limitApplied: totalCount > maxResults
-          })
-        }
-      } 
-		catch (timeoutError: any) {
+      } catch (timeoutError: any) {
         console.error('❌ Query timeout:', timeoutError)
         
         return NextResponse.json({
@@ -1721,13 +1356,13 @@ You can view all products in the results table below.`
     }
 
     // ========================================================================
-    // STEP 4: HANDLE ANALYTICAL QUESTIONS WITH SMART AI
+    // STEP 4: HANDLE ANALYTICAL QUESTIONS
     // ========================================================================
     
     if (searchParams.questionType === "analytical") {
-      console.log(`🤖 Analytical mode - generating Smart AI summary from ${cleanedResults.length} products`)
+      console.log(`🤖 Analytical mode - generating AI summary from ${cleanedResults.length} products`)
       
-      const aiSummary = await generateSmartAISummary(query, cleanedResults, 'analytical')
+      const aiSummary = await generateAISummary(query, cleanedResults)
       
       return NextResponse.json({
         success: true,
@@ -1740,7 +1375,7 @@ You can view all products in the results table below.`
     }
 
     // ========================================================================
-    // STEP 5: HANDLE COMPARISON QUESTIONS WITH SMART AI
+    // STEP 5: HANDLE COMPARISON QUESTIONS
     // ========================================================================
     
     if (searchParams.questionType === "comparison") {
@@ -1770,8 +1405,8 @@ You can view all products in the results table below.`
         const comparisonType = detectComparisonType(productsToCompare)
         console.log(`📊 Comparison type detected: ${comparisonType}`)
         
-        console.log(`🤖 Generating Smart AI comparison analysis`)
-        const comparisonSummary = await generateSmartComparisonAnalysis(query, productsToCompare, comparisonType)
+        console.log(`🤖 Generating AI comparison analysis`)
+        const comparisonSummary = await generateComparisonAnalysis(query, productsToCompare, comparisonType)
         
         return NextResponse.json({
           success: true,
@@ -1794,20 +1429,20 @@ You can view all products in the results table below.`
     }
 
     // ========================================================================
-    // STEP 6: HANDLE SPECIFIC AI QUESTIONS WITH SMART AI
+    // STEP 6: HANDLE SPECIFIC AI QUESTIONS
     // ========================================================================
     
     if (searchParams.questionType === "specific_ai" && cleanedResults.length > 0) {
       const product = cleanedResults[0]
       const attributeQuestion = searchParams.attributeQuestion || query
       
-      console.log('🤖 Using Smart AI to extract answer from product data')
+      console.log('🤖 Using AI to extract answer from product data')
       
       try {
-        const productDataString = prepareCompleteProductDataForAI([product])
+        const productDataString = truncateProductForAI(product, 8000)
         
         const answerCompletion = await openai.chat.completions.create({
-          model: 'gpt-4o',
+          model: 'gpt-4o-mini',
           messages: [
             {
               role: 'system',
@@ -1815,14 +1450,12 @@ You can view all products in the results table below.`
 
 RULES:
 - Answer directly and concisely
-- If information not found, say "This information is not available in the product data"
+- If information not found, say "Information not available in product data"
 - Extract ALL relevant information
-- Use dashes (-) for lists, NOT bullet points (•)
+- Format lists with bullet points using "•"
 - Remove all HTML tags
 - Convert HTML entities (e.g., &deg; to °, &reg; to ®)
-- Convert field names naturally (e.g., "Cure Time" not "Cure_Time")
 - Be specific and complete
-- Search through ALL fields intelligently
 
 PRODUCT DATA:
 ${productDataString}`
@@ -1859,25 +1492,6 @@ ${productDataString}`
           message: "Found product but couldn't extract specific answer. Showing full details."
         })
       }
-    }
-
-    // ========================================================================
-    // STEP 7: HANDLE LIST QUESTIONS WITH SMART AI SUMMARY
-    // ========================================================================
-    
-    if (searchParams.questionType === "list" && cleanedResults.length > 0) {
-      console.log(`📋 List mode - generating Smart AI summary for ${cleanedResults.length} products`)
-      
-      // Generate AI summary for better context
-      const aiSummary = await generateSmartAISummary(query, cleanedResults, 'list')
-      
-      return NextResponse.json({
-        success: true,
-        questionType: "list",
-        summary: aiSummary,
-        results: cleanedResults,
-        count: cleanedResults.length
-      })
     }
 
     // ========================================================================

@@ -58,61 +58,71 @@ export default function Home() {
     }
   }
 
-  const handleSearch = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setError('')
-    setResults([])
-    setSpecificAnswer(null)
-    setComparisonData(null)
-    setAnalyticalData(null)
-    setHasSearched(true)
+	const handleSearch = async (e: React.FormEvent) => {
+	  e.preventDefault()
+	  setLoading(true)
+	  setError('')
+	  setResults([])
+	  setSpecificAnswer(null)
+	  setComparisonData(null)
+	  setAnalyticalData(null)
+	  setHasSearched(true)
 
-    try {
-      const response = await fetch('/api/smart-search', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          query,
-          filters: {
-            family: selectedFamily,
-            productType: selectedProductType,
-            specification: selectedSpecification
-          }
-        }),
-      })
+	  try {
+		const response = await fetch('/api/smart-search', {
+		  method: 'POST',
+		  headers: {
+			'Content-Type': 'application/json',
+		  },
+		  body: JSON.stringify({ 
+			query,
+			filters: {
+			  family: selectedFamily,
+			  productType: selectedProductType,
+			  specification: selectedSpecification
+			}
+		  }),
+		})
 
-      const data = await response.json()
+		const data = await response.json()
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Search failed')
-      }
+		// 🔍 DEBUG LOG - Check what API returns
+		console.log('📦 API Response:', data)
+		console.log('📝 Summary field:', data.summary)
+		console.log('🎯 Question Type:', data.questionType)
 
-      if (data.questionType === 'analytical') {
-        setAnalyticalData(data)
-        setResults(data.results || [])
-      }
-      else if (data.questionType === 'comparison') {
-        setComparisonData(data)
-        setResults(data.products || [])
-      }
-      else if (data.questionType === 'specific') {
-        setSpecificAnswer(data)
-        if (data.fullProduct) {
-          setResults([data.fullProduct])
-        }
-      } 
-      else {
-        setResults(data.results || [])
-      }
-    } catch (err: any) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
+		if (!response.ok) {
+		  throw new Error(data.error || 'Search failed')
+		}
+
+		if (data.questionType === 'analytical') {
+		  setAnalyticalData(data)
+		  setResults(data.results || [])
+		}
+		else if (data.questionType === 'comparison') {
+		  setComparisonData(data)
+		  setResults(data.products || [])
+		}
+		else if (data.questionType === 'specific') {
+		  setSpecificAnswer(data)
+		  if (data.fullProduct) {
+			setResults([data.fullProduct])
+		  }
+		}
+		// ✅ ADD THIS: Handle count queries
+		else if (data.questionType === 'count') {
+		  setAnalyticalData(data)  // ✅ Use analyticalData to display summary
+		  setResults(data.results || [])
+		}
+		else {
+		  setResults(data.results || [])
+		}
+	  } catch (err: any) {
+		setError(err.message)
+	  } finally {
+		setLoading(false)
+	  }
+	}
 
   const clearFilters = () => {
     setSelectedFamily('')
