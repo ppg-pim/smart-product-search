@@ -794,7 +794,7 @@ async function generateSmartComparisonAnalysis(
   try {
     const productsData = prepareCompleteProductDataForAI(products)
     
-    console.log(`🤖 Generating smart comparison analysis:`)
+    console.log(`Generating smart comparison analysis:`)
     console.log(`   - Products: ${products.length}`)
     console.log(`   - Comparison type: ${comparisonType}`)
     console.log(`   - Data size: ${productsData.length} chars`)
@@ -808,7 +808,7 @@ async function generateSmartComparisonAnalysis(
         },
         {
           role: 'user',
-          content: `**USER INTENT:** The user wants to compare these ${products.length} products.
+			content: `**USER INTENT:** The user wants to compare these ${products.length} products.
 
 **COMPARISON TYPE:** ${comparisonType}
 
@@ -819,22 +819,39 @@ ${query}
 ${productsData}
 
 Please provide a detailed comparison analysis:
-1. **Create a comparison table** for key specifications (if 3+ specs to compare)
+${products.length === 2 ? 
+`
+1. **Create a side-by-side comparison** for key specifications
 2. **Highlight key differences** - What makes each product unique
 3. **Note similarities** - What they have in common
 4. **Explain use cases** - When to use each product
 5. **Make recommendations** - Which product is best for specific applications
+` : 
+`
+1. **Start with a quick summary** of the main differences
+2. **Group by specification categories** (e.g., Physical Properties, Performance, Application)
+3. **Highlight key differences** for each category
+4. **Note similarities** - What they all have in common
+5. **Make recommendations** - Which product is best for specific applications
+
+**IMPORTANT FOR ${products.length} PRODUCTS:**
+- DO NOT use wide tables
+- Use grouped sections with clear headings
+- Show differences in a scannable format
+- Use side-by-side format within each section
+- Make it easy to compare all ${products.length} products at once
+`}
 
 Remember:
 - Search through ALL fields to find comparable data
 - Use natural field names (spaces, not underscores)
-- Use dashes (-) for lists
+- Use dashes (-) for lists, NOT bullet points (•)
 - Be specific and cite actual values
 - Explain WHY differences matter for the end user`
         }
       ],
       temperature: 0.2,
-      max_tokens: 2000
+      max_tokens: 3000
     })
     
     let analysis = comparisonCompletion.choices[0].message.content || 'Unable to generate comparison'
@@ -1221,13 +1238,16 @@ QUESTION TYPE DETECTION:
  - Use "any" searchType to find ALL variants
  - Set limit: 500
 
-4. **COMPARISON QUERIES** ("difference", "compare", "vs", "versus", "between"):
+4. **COMPARISON QUERIES** ("difference", "different", "compare", "comparison", "vs", "versus", "between"):
  - Set questionType: "comparison"
- - Extract product identifiers (just numbers)
+ - Extract ALL product identifiers (just numbers) - e.g., ["890F", "890N", "890M", "890"]
+ - Add them to compareProducts array
  - Create filters for EACH product
  - Search in: sku, product_name, name, family, searchable_text
  - Use "any" searchType (OR logic)
  - Set limit: 500
+ - **IMPORTANT:** Extract ALL product codes mentioned, not just 2
+
 
 5. **ATTRIBUTE QUESTIONS** ("what is the [attribute] of [product]"):
  - Set questionType: "specific_ai"
@@ -1764,13 +1784,13 @@ You can view all products in the results table below.`
         })
         
         const productsToCompare = groupedProducts.length >= 2 
-          ? groupedProducts.slice(0, 2) 
-          : cleanedResults.slice(0, 2)
+          ? groupedProducts 
+          : cleanedResults.slice(0, Math.min(compareProducts.length || 2, cleanedResults.length))
         
         const comparisonType = detectComparisonType(productsToCompare)
         console.log(`📊 Comparison type detected: ${comparisonType}`)
         
-        console.log(`🤖 Generating Smart AI comparison analysis`)
+        console.log(`📊 Generating Smart AI comparison analysis`)
         const comparisonSummary = await generateSmartComparisonAnalysis(query, productsToCompare, comparisonType)
         
         return NextResponse.json({
