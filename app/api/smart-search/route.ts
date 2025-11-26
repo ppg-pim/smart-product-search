@@ -50,7 +50,7 @@ function generateSearchVariations(productCode: string): string[] {
 }
 
 // ============================================================================
-// META-QUESTION DETECTION
+// META-QUESTION DETECTION (UPDATED)
 // ============================================================================
 
 function detectMetaQuestion(query: string): { isMeta: boolean; type: string | null } {
@@ -59,11 +59,16 @@ function detectMetaQuestion(query: string): { isMeta: boolean; type: string | nu
   // Check if query mentions specific product (PS 870, PR-1422, etc.)
   const hasSpecificProduct = /\b(ps|p\/s|pr|korotherm|class|[a-z]{2,}\s*\d{3,}|\d{3,})\b/i.test(query)
   
-  // Count questions - BUT ONLY if no specific product/filter is mentioned
+  // UPDATED: Only treat as meta if it's EXACTLY asking for total count with NO filters or specific products
   if (
-    (lowerQuery.match(/^how many (products?|items?|sealants?|entries?)(\s+(are|do|in))?$/) ||
-    lowerQuery.match(/^total (number of )?(products?|items?|sealants?)$/) ||
-    lowerQuery.match(/^count (of )?(products?|items?|sealants?)$/)) &&
+    (lowerQuery === 'how many products' ||
+     lowerQuery === 'how many products are in the system' ||
+     lowerQuery === 'how many products in database' ||
+     lowerQuery === 'how many products are there' ||
+     lowerQuery === 'total products' ||
+     lowerQuery === 'count products' ||
+     lowerQuery === 'how many items' ||
+     lowerQuery === 'total number of products') &&
     !hasSpecificProduct
   ) {
     console.log('🎯 Detected generic count query (no specific product)')
@@ -144,25 +149,51 @@ async function handleMetaQuestion(
       
       console.log(`✅ Total products: ${count}`)
       
-      const filterText = filters?.family || filters?.productType || filters?.specification
-        ? ` with applied filters`
-        : ''
+      // ===================================================================
+      // NEW: Fetch sample products for better display
+      // ===================================================================
       
-      const categoryText = lowerQuery.includes('sealant') ? ' in Sealants category' : ''
+      const maxSample = Math.min(count || 0, 500)
       
-      const summary = `**Product Count${categoryText}**
-
-I found **${(count || 0).toLocaleString()} products**${categoryText}${filterText}.
-
-${count && count > 100 ? 'You can use filters or search for specific products to narrow down the results.' : ''}`
+      let sampleQuery = supabase.from('products').select('*')
+      
+      // Apply same filters
+      if (filters?.family) sampleQuery = sampleQuery.eq('family', filters.family)
+      if (filters?.productType) sampleQuery = sampleQuery.eq('product_type', filters.productType)
+      if (filters?.specification) sampleQuery = sampleQuery.eq('specification', filters.specification)
+      
+      if (lowerQuery.includes('sealant')) {
+        sampleQuery = sampleQuery.or(
+          'categories.ilike.%Sealants%,' +
+          'family.ilike.%Sealant%,' +
+          'product_type.ilike.%Sealant%,' +
+          'searchable_text.ilike.%Sealant%'
+        )
+      }
+      
+      sampleQuery = sampleQuery.limit(maxSample)
+      
+      const { data: sampleProducts } = await sampleQuery
+      
+      // Clean the products
+      const cleanedSamples = (sampleProducts || []).map((p: any) => cleanProductData(p))
+      
+      console.log(`✅ Fetched ${cleanedSamples.length} sample products`)
+      
+      // Generate AI summary
+      console.log('🤖 Generating AI summary for meta count query...')
+      const aiSummary = await generateCountSummary(count || 0, cleanedSamples, query)
       
       return {
         success: true,
-        questionType: 'meta',
+        questionType: 'analytical', // ✅ CHANGED from 'meta' to 'analytical'
         metaType: 'count',
-        summary,
+        summary: aiSummary, // ✅ Use AI-generated summary
         count: count || 0,
-        results: []
+        results: cleanedSamples.slice(0, 50), // ✅ Show first 50 products
+        totalResults: count || 0,
+        displayedResults: Math.min(50, cleanedSamples.length),
+        message: `Analysis based on ${count?.toLocaleString() || 0} total products`
       }
     }
     
@@ -199,12 +230,13 @@ You can filter by any of these categories using the filter options in the search
       
       return {
         success: true,
-        questionType: 'meta',
+        questionType: 'analytical', // ✅ CHANGED from 'meta'
         metaType: 'list',
         summary,
         families,
         types,
-        results: []
+        results: [],
+        count: 0
       }
     }
     
@@ -242,12 +274,13 @@ You can filter by any of these categories using the filter options in the search
       
       return {
         success: true,
-        questionType: 'meta',
+        questionType: 'analytical', // ✅ CHANGED from 'meta'
         metaType: 'overview',
         summary,
         totalCount: count || 0,
         familyCount: families.length,
-        results: []
+        results: [],
+        count: count || 0
       }
     }
     
@@ -513,6 +546,60 @@ ${combinedData}`
     }
     
     return 'Unable to generate AI summary at this time. Please review the product details below.'
+  }
+}
+
+// ============================================================================
+// NEW: Generate Count Summary with AI Analysis
+// ============================================================================
+
+async function generateCountSummary(count: number, products: ProductRecord[], query: string): Promise<string> {
+  try {
+    // Get unique families and types
+    const families = new Set<string>()
+    const types = new Set<string>()
+    const specs = new Set<string>()
+    
+    products.slice(0, 500).forEach((p: any) => {
+      const family = p.family || p.Family || p.product_family
+      if (family) families.add(family)
+      
+      const type = p.product_type || p.productType || p.type
+      if (type) types.add(type)
+      
+      const spec = p.specification || p.Specification
+      if (spec) specs.add(spec)
+    })
+    
+    const familyList = Array.from(families).slice(0, 10)
+    const typeList = Array.from(types).slice(0, 10)
+    
+    const summary = `**Product Database Overview**
+
+I found **${count.toLocaleString()} products** in the system.
+
+**Product Distribution:**
+
+**Top Product Families (${families.size} total):**
+${familyList.map(f => `• ${f}`).join('\n')}${families.size > 10 ? `\n_...and ${families.size - 10} more families_` : ''}
+
+**Product Types (${types.size} total):**
+${typeList.map(t => `• ${t}`).join('\n')}${types.size > 10 ? `\n_...and ${types.size - 10} more types_` : ''}
+
+**Specifications:** ${specs.size} unique specifications available
+
+**Database Capabilities:**
+• Search across all product specifications
+• Compare products side-by-side
+• Filter by family, type, and specification
+• AI-powered recommendations
+
+You can use filters or search for specific products to explore the catalog.`
+    
+    return summary
+  } catch (error) {
+    console.error('❌ Error generating count summary:', error)
+    return `**Product Count**\n\nI found **${count.toLocaleString()} products** in the system.\n\nUse filters or search to explore specific products.`
   }
 }
 
@@ -1180,7 +1267,7 @@ Response:
     }
 
     // ========================================================================
-    // OPTIMIZE FOR COUNT QUERIES - USE SUPABASE COUNT
+    // UPDATED: COUNT QUERY HANDLER WITH AI SUMMARY
     // ========================================================================
 
     if (isCountQuery(query)) {
@@ -1254,94 +1341,46 @@ Response:
         
         console.log(`✅ Total count: ${count}`)
         
-        // =====================================================================
-        // FETCH ALL MATCHING PRODUCTS (handle pagination for > 1000 results)
-        // =====================================================================
+        // Fetch sample products for AI summary (limit to 500 for performance)
+        const maxSample = Math.min(count || 0, 500)
         
-        const maxResults = Math.min(count || 0, 3000) // Cap at 3000 for performance
-        const batchSize = 1000 // Supabase max per request
-        let allProducts: any[] = []
+        let sampleQuery = supabase.from('products').select('*')
+        sampleQuery = applyUserFilters(sampleQuery, filters, columns, [])
         
-        // Calculate number of batches needed
-        const numBatches = Math.ceil(maxResults / batchSize)
-        
-        console.log(`📦 Fetching ${maxResults} products in ${numBatches} batch(es)...`)
-        
-        // Fetch in batches
-        for (let i = 0; i < numBatches; i++) {
-          const offset = i * batchSize
-          const limit = Math.min(batchSize, maxResults - offset)
-          
-          let batchQuery = supabase.from('products').select('*')
-          batchQuery = applyUserFilters(batchQuery, filters, columns, [])
-          
-          if (searchParams.filters.length > 0 && searchParams.searchType === "any") {
-            const orConditionString = buildOrConditions(searchParams.filters, columns)
-            if (orConditionString) {
-              batchQuery = batchQuery.or(orConditionString)
-            }
-          }
-          
-          // Apply pagination
-          batchQuery = batchQuery.range(offset, offset + limit - 1)
-          
-          const { data: batchData, error: fetchError } = await batchQuery
-          
-          if (fetchError) {
-            console.error(`❌ Error fetching batch ${i + 1}:`, fetchError)
-            throw new Error(`Fetch error: ${fetchError.message}`)
-          }
-          
-          if (batchData && batchData.length > 0) {
-            allProducts = allProducts.concat(batchData)
-            console.log(`✅ Fetched batch ${i + 1}/${numBatches}: ${batchData.length} products (total: ${allProducts.length})`)
-          }
-          
-          // Stop if we got fewer results than expected (no more data)
-          if (!batchData || batchData.length < limit) {
-            break
+        if (searchParams.filters.length > 0 && searchParams.searchType === "any") {
+          const orConditionString = buildOrConditions(searchParams.filters, columns)
+          if (orConditionString) {
+            sampleQuery = sampleQuery.or(orConditionString)
           }
         }
         
-        console.log(`✅ Total fetched: ${allProducts.length} products`)
+        sampleQuery = sampleQuery.limit(maxSample)
+        
+        const { data: sampleProducts, error: fetchError } = await sampleQuery
+        
+        if (fetchError) {
+          console.error('❌ Error fetching sample products:', fetchError)
+          throw new Error(`Fetch error: ${fetchError.message}`)
+        }
+        
+        console.log(`✅ Fetched ${sampleProducts?.length || 0} sample products for analysis`)
         
         // Clean the products
-        cleanedResults = allProducts.map((p: any) => cleanProductData(p))
+        const cleanedSamples = (sampleProducts || []).map((p: any) => cleanProductData(p))
         
-        // Get unique families for summary
-        const families = new Set<string>()
-        cleanedResults.forEach((p: any) => {
-          const family = p.family || p.Family || p.product_family
-          if (family) families.add(family)
-        })
-        
-        const familyList = Array.from(families).slice(0, 10) // Show top 10 families
-        const productContext = searchParams.searchKeywords?.join(', ') || 'matching products'
-        
-        const familyText = familyList.length > 0 
-          ? `\n\n**Product Families Found:**\n${familyList.map(f => `• ${f}`).join('\n')}${families.size > 10 ? `\n_...and ${families.size - 10} more families_` : ''}`
-          : ''
-        
-        const limitWarning = count && count > maxResults 
-          ? `\n\n⚠️ **Note:** Showing first ${maxResults.toLocaleString()} results for performance. Use filters to narrow down your search.`
-          : ''
-        
-        const summary = `**Product Count: ${productContext}**
-
-I found **${(count || 0).toLocaleString()} product(s)** matching "${productContext}".${familyText}${limitWarning}
-
-You can view all ${cleanedResults.length.toLocaleString()} products in the results table below.`
+        // Generate AI summary
+        console.log('🤖 Generating AI summary for count query...')
+        const aiSummary = await generateCountSummary(count || 0, cleanedSamples, query)
         
         return NextResponse.json({
           success: true,
-          questionType: "count",
-          summary: summary,
+          questionType: "analytical", // Changed from "count" to show AI summary box
+          summary: aiSummary,
           count: count || 0,
-          results: cleanedResults,
+          results: cleanedSamples.slice(0, 50), // Show first 50 as reference
           totalResults: count || 0,
-          displayedResults: cleanedResults.length,
-          families: Array.from(families),
-          limitApplied: count && count > maxResults
+          displayedResults: Math.min(50, cleanedSamples.length),
+          message: `Analysis based on ${count?.toLocaleString() || 0} total products`
         })
         
       } catch (timeoutError: any) {
