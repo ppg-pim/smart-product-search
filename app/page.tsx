@@ -11,8 +11,6 @@ export default function Home() {
   const [comparisonData, setComparisonData] = useState<any>(null)
   const [analyticalData, setAnalyticalData] = useState<any>(null)
   const [hasSearched, setHasSearched] = useState(false)
-  const [searchProgress, setSearchProgress] = useState('')
-  const [searchTime, setSearchTime] = useState<number | null>(null)
   
   const [selectedFamily, setSelectedFamily] = useState('')
   const [selectedProductType, setSelectedProductType] = useState('')
@@ -24,76 +22,9 @@ export default function Home() {
   const [specificationOptions, setSpecificationOptions] = useState<string[]>([])
   const [loadingFilters, setLoadingFilters] = useState(true)
 
-  const [metaQuestionData, setMetaQuestionData] = useState<any>(null)
-
   useEffect(() => {
     loadFilterOptionsInline()
   }, [])
-
-  // Enhanced markdown rendering function with table support
-  const renderMarkdown = (markdown: string, colorClass: string = 'green'): string => {
-    let html = markdown
-    
-    // Color class mappings (Tailwind-safe - no dynamic classes)
-    const colors: { [key: string]: { heading: string; text: string; bold: string } } = {
-      green: { heading: 'text-green-800', text: 'text-green-900', bold: 'text-green-900' },
-      indigo: { heading: 'text-indigo-800', text: 'text-indigo-900', bold: 'text-indigo-900' },
-      purple: { heading: 'text-purple-800', text: 'text-purple-900', bold: 'text-purple-900' },
-      blue: { heading: 'text-blue-800', text: 'text-blue-900', bold: 'text-blue-900' }
-    }
-    
-    const color = colors[colorClass] || colors.green
-    
-    // 1. Handle markdown tables FIRST (before other replacements)
-    const tablePattern = /\n\|(.+)\|\n\|[\-:\s|]+\|\n((?:\|.+\|\n?)+)/g
-    html = html.replace(tablePattern, (match, header, rows) => {
-      const headerCells = header.split('|').filter((cell: string) => cell.trim()).map((cell: string) => 
-        `<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700 border-b-2 border-gray-300 bg-gray-50">${cell.trim()}</th>`
-      ).join('')
-      
-      const bodyRows = rows.trim().split('\n').map((row: string) => {
-        const cells = row.split('|').filter((cell: string) => cell.trim()).map((cell: string) => 
-          `<td class="px-4 py-3 text-sm text-gray-800 border-b border-gray-200">${cell.trim()}</td>`
-        ).join('')
-        return `<tr class="hover:bg-gray-50">${cells}</tr>`
-      }).join('')
-      
-      return `<div class="overflow-x-auto my-6"><table class="min-w-full bg-white border border-gray-300 rounded-lg shadow-sm"><thead><tr>${headerCells}</tr></thead><tbody>${bodyRows}</tbody></table></div>`
-    })
-    
-    // 2. Handle headings
-    html = html.replace(/### (.*?)(\n|$)/g, `<h3 class="text-xl font-bold ${color.heading} mt-6 mb-3">$1</h3>`)
-    html = html.replace(/## (.*?)(\n|$)/g, `<h2 class="text-2xl font-bold ${color.text} mt-6 mb-4">$1</h2>`)
-    html = html.replace(/# (.*?)(\n|$)/g, `<h1 class="text-3xl font-bold ${color.text} mt-6 mb-4">$1</h1>`)
-    
-    // 3. Handle bold text
-    html = html.replace(/\*\*(.*?)\*\*/g, `<strong class="font-bold ${color.bold}">$1</strong>`)
-    
-    // 4. Handle bullet lists (convert - to •)
-    html = html.replace(/\n- /g, '\n• ')
-    
-    // 5. Handle paragraphs
-    const lines = html.split('\n\n')
-    const processedLines = lines.map(line => {
-      // Skip if already HTML
-      if (line.trim().startsWith('<')) return line
-      // Skip empty lines
-      if (line.trim() === '') return ''
-      // Wrap in paragraph
-      return `<p class="mt-4">${line}</p>`
-    })
-    html = processedLines.join('')
-    
-    // 6. Handle lists within paragraphs
-    html = html.replace(/<p class="mt-4">• /g, '<ul class="list-disc ml-6 mt-3 space-y-2"><li>')
-    html = html.replace(/\n• /g, '</li><li>')
-    html = html.replace(/<\/li><li>([^<]*?)(?=<\/p>|<h[123]|<table|$)/g, '</li><li>$1</li></ul>')
-    
-    // 7. Clean up empty paragraphs
-    html = html.replace(/<p class="mt-4"><\/p>/g, '')
-    
-    return html
-  }
 
   const loadFilterOptionsInline = async () => {
     setLoadingFilters(true)
@@ -135,16 +66,9 @@ export default function Home() {
     setSpecificAnswer(null)
     setComparisonData(null)
     setAnalyticalData(null)
-    setMetaQuestionData(null)
     setHasSearched(true)
-    setSearchProgress('Analyzing your query...')
-    setSearchTime(null)
-
-    const startTime = Date.now()
 
     try {
-      setSearchProgress('Searching database...')
-      
       const response = await fetch('/api/smart-search', {
         method: 'POST',
         headers: {
@@ -161,36 +85,14 @@ export default function Home() {
       })
 
       const data = await response.json()
-      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1)
-      setSearchTime(parseFloat(elapsed))
-
-      console.log('📦 API Response:', data)
-      console.log('📝 Summary field:', data.summary)
-      console.log('🎯 Question Type:', data.questionType)
 
       if (!response.ok) {
         throw new Error(data.error || 'Search failed')
       }
 
-      setSearchProgress('Processing results...')
-
-      if (data.questionType === 'meta') {
-        console.log('🎯 Meta-question detected:', data.metaType)
-        setMetaQuestionData(data)
-        setSearchProgress(`Meta-question answered in ${elapsed}s`)
-        
-        if (data.metaType === 'count' && data.filter && data.count > 0) {
-          console.log('🔍 Fetching products for filtered count...')
-          await fetchFilteredProducts(data.filter)
-        }
-        
-        setLoading(false)
-        return
-      }
-
       if (data.questionType === 'analytical') {
         setAnalyticalData(data)
-        setResults(data.results || data.products || [])
+        setResults(data.results || [])
       }
       else if (data.questionType === 'comparison') {
         setComparisonData(data)
@@ -201,69 +103,14 @@ export default function Home() {
         if (data.fullProduct) {
           setResults([data.fullProduct])
         }
-      }
-      else if (data.questionType === 'count') {
-        setAnalyticalData(data)
-        setResults(data.results || [])
-      }
+      } 
       else {
-        setResults(data.results || data.products || [])
-        if (data.summary) {
-          setSpecificAnswer({
-            summary: data.summary,
-            count: data.count || 0,
-            totalFound: data.totalFound || 0
-          })
-        }
+        setResults(data.results || [])
       }
     } catch (err: any) {
       setError(err.message)
     } finally {
       setLoading(false)
-      setSearchProgress('')
-    }
-  }
-
-  const fetchFilteredProducts = async (filter: { filterType: string; filterValue: string }) => {
-    try {
-      console.log(`🔍 Fetching products with ${filter.filterType} = ${filter.filterValue}`)
-      
-      const searchQuery = `products in ${filter.filterValue} ${filter.filterType}`
-      
-      const response = await fetch('/api/smart-search', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          query: searchQuery,
-          filters: {
-            family: filter.filterType === 'family' ? filter.filterValue : '',
-            productType: filter.filterType === 'type' ? filter.filterValue : '',
-            specification: filter.filterType === 'specification' ? filter.filterValue : ''
-          }
-        }),
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-        if (data.products && data.products.length > 0) {
-          console.log(`✅ Fetched ${data.products.length} products`)
-          setResults(data.products)
-        } else if (data.results && data.results.length > 0) {
-          console.log(`✅ Fetched ${data.results.length} products`)
-          setResults(data.results)
-        }
-      }
-    } catch (err) {
-      console.error('Error fetching filtered products:', err)
-    }
-  }
-
-  const scrollToProducts = () => {
-    const element = document.getElementById('product-references')
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'start' })
     }
   }
 
@@ -283,32 +130,23 @@ export default function Home() {
   }
 
   const groupAttributes = (product: any) => {
-    const headerFieldsOrder = ['sku', 'product_name', 'productname', 'name', 'product_description', 'description']
-    const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext', 'searchable', '_sourceTable']
+    const headerFields = ['sku', 'name', 'product_name', 'productname', 'description', 'product_description']
+    const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext', 'searchable']
     
     const header: any = {}
     const other: any = {}
     const seen = new Set<string>()
 
-    const headerCandidates: { [key: string]: any } = {}
-    
     Object.entries(product).forEach(([key, value]) => {
       const lowerKey = key.toLowerCase()
       
       if (seen.has(lowerKey) || excludeFields.includes(lowerKey) || isEmpty(value)) return
       seen.add(lowerKey)
       
-      if (headerFieldsOrder.includes(lowerKey)) {
-        headerCandidates[lowerKey] = { originalKey: key, value }
+      if (headerFields.includes(lowerKey)) {
+        header[key] = value
       } else {
         other[key] = value
-      }
-    })
-
-    headerFieldsOrder.forEach(fieldName => {
-      if (headerCandidates[fieldName]) {
-        const { originalKey, value } = headerCandidates[fieldName]
-        header[originalKey] = value
       }
     })
 
@@ -321,7 +159,6 @@ export default function Home() {
       'product_name': 'Product Name',
       'productname': 'Product Name',
       'product_description': 'Description',
-      'description': 'Description',
     }
     
     const lowerKey = key.toLowerCase()
@@ -350,7 +187,7 @@ export default function Home() {
   const getAllKeys = (products: any[]) => {
     const allKeys = new Set<string>()
     const seenLowerKeys = new Set<string>()
-    const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext', '_sourceTable']
+    const excludeFields = ['embedding', 'created_at', 'updated_at', 'createdat', 'updatedat', 'searchable_text', 'searchabletext']
     
     products.forEach(product => {
       Object.keys(product).forEach(key => {
@@ -385,16 +222,24 @@ export default function Home() {
               <div className="ml-4 flex-1">
                 <h2 className="text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
                 <p className="text-green-700 text-sm">
-                  Based on analysis of {analyticalData.count} sealant product(s)
-                  {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
+                  Based on analysis of {analyticalData.count} product(s)
                 </p>
               </div>
             </div>
             
             <div className="prose prose-green max-w-none">
               <div 
-                className="text-gray-800 leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(analyticalData.summary, 'green') }}
+                className="text-gray-800 leading-relaxed whitespace-pre-wrap"
+                dangerouslySetInnerHTML={{ 
+                  __html: analyticalData.summary
+                    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-green-900">$1</strong>')
+                    .replace(/\n\n/g, '</p><p class="mt-4">')
+                    .replace(/^/, '<p>')
+                    .replace(/$/, '</p>')
+                    .replace(/• /g, '<li class="ml-4">')
+                    .replace(/<\/p><p class="mt-4"><li/g, '</p><ul class="list-disc ml-6 mt-2 space-y-1"><li')
+                    .replace(/<li class="ml-4">(.*?)<\/p>/g, '<li class="ml-4">$1</li></ul><p class="mt-4">')
+                }}
               />
             </div>
           </div>
@@ -408,13 +253,15 @@ export default function Home() {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <span className="text-sm font-medium text-blue-900">
-                  {analyticalData.count} sealant product reference{analyticalData.count !== 1 ? 's' : ''} available below
+                  {analyticalData.count} product reference{analyticalData.count !== 1 ? 's' : ''} available below
                 </span>
               </div>
               <button
-                onClick={scrollToProducts}
-                className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
-                type="button"
+                onClick={() => {
+                  const element = document.getElementById('product-references')
+                  element?.scrollIntoView({ behavior: 'smooth' })
+                }}
+                className="text-sm font-medium text-blue-600 hover:text-blue-800 underline"
               >
                 View Details →
               </button>
@@ -425,71 +272,66 @@ export default function Home() {
     )
   }
 
-  const renderMetaSummary = () => {
-    if (!metaQuestionData) return null
+  const renderComparisonSummary = () => {
+    if (!comparisonData || !comparisonData.comparisonSummary) return null
 
     return (
       <div className="mb-8">
-        <div className="bg-gradient-to-r from-indigo-50 to-purple-50 border-l-4 border-indigo-500 rounded-lg overflow-hidden shadow-lg">
+        <div className="bg-gradient-to-r from-purple-50 to-indigo-50 border-l-4 border-purple-500 rounded-lg overflow-hidden shadow-lg">
           <div className="p-6">
             <div className="flex items-start mb-4">
               <div className="flex-shrink-0">
-                <svg className="h-8 w-8 text-indigo-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                <svg className="h-8 w-8 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
                 </svg>
               </div>
               <div className="ml-4 flex-1">
-                <h2 className="text-2xl font-bold text-indigo-900 mb-2">Database Information</h2>
-                <p className="text-indigo-700 text-sm">
-                  {metaQuestionData.metaType === 'count' && 'Product count summary'}
-                  {metaQuestionData.metaType === 'list' && 'Available product categories'}
-                  {metaQuestionData.metaType === 'overview' && 'Complete database overview'}
-                  {searchTime && <span className="ml-2">• Retrieved in {searchTime}s</span>}
+                <h2 className="text-2xl font-bold text-purple-900 mb-2">Comparison Analysis</h2>
+                <p className="text-purple-700 text-sm">
+                  {comparisonData.comparisonType === 'sku' ? 'SKU-to-SKU Comparison' : `Comparing ${comparisonData.products?.length || 0} products`}
                 </p>
               </div>
             </div>
             
-            <div className="prose prose-indigo max-w-none">
+            <div className="prose prose-purple max-w-none">
               <div 
-                className="text-gray-800 leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(metaQuestionData.summary, 'indigo') }}
+                className="text-gray-800 leading-relaxed whitespace-pre-wrap"
+                dangerouslySetInnerHTML={{ 
+                  __html: comparisonData.comparisonSummary
+                    .replace(/\*\*(.*?)\*\*/g, '<strong class="text-purple-900">$1</strong>')
+                    .replace(/\n\n/g, '</p><p class="mt-4">')
+                    .replace(/^/, '<p>')
+                    .replace(/$/, '</p>')
+                    .replace(/• /g, '<li class="ml-4">')
+                    .replace(/<\/p><p class="mt-4"><li/g, '</p><ul class="list-disc ml-6 mt-2 space-y-1"><li')
+                    .replace(/<li class="ml-4">(.*?)<\/p>/g, '<li class="ml-4">$1</li></ul><p class="mt-4">')
+                }}
               />
             </div>
-
-            {metaQuestionData.count !== undefined && (
-              <div className="mt-4 pt-4 border-t border-indigo-200">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-indigo-700">Total Count:</span>
-                  <span className="bg-indigo-100 text-indigo-800 px-3 py-1 rounded-full font-semibold">
-                    {metaQuestionData.count.toLocaleString()}
-                  </span>
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
-        {results.length > 0 && (
-          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <svg className="h-5 w-5 text-blue-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="text-sm font-medium text-blue-900">
-                  {results.length} sealant product reference{results.length !== 1 ? 's' : ''} available below
-                </span>
-              </div>
-              <button
-                onClick={scrollToProducts}
-                className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
-                type="button"
-              >
-                View Details →
-              </button>
+        <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <svg className="h-5 w-5 text-blue-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              <span className="text-sm font-medium text-blue-900">
+                Detailed comparison table available below
+              </span>
             </div>
+            <button
+              onClick={() => {
+                const element = document.getElementById('comparison-table')
+                element?.scrollIntoView({ behavior: 'smooth' })
+              }}
+              className="text-sm font-medium text-blue-600 hover:text-blue-800 underline"
+            >
+              View Table →
+            </button>
           </div>
-        )}
+        </div>
       </div>
     )
   }
@@ -502,54 +344,17 @@ export default function Home() {
     const products = comparisonData.products
     const allKeys = getAllKeys(products)
     
-    const priorityFieldsOrder = ['sku', 'product_name', 'productname', 'name', 'product_description', 'description']
+    const priorityFields = ['sku', 'product_name', 'productname', 'name', 'description', 'product_description']
     
-    const priority = allKeys
-      .filter(k => priorityFieldsOrder.includes(k.toLowerCase()))
-      .sort((a, b) => {
-        const indexA = priorityFieldsOrder.indexOf(a.toLowerCase())
-        const indexB = priorityFieldsOrder.indexOf(b.toLowerCase())
-        return indexA - indexB
-      })
-    
-    const technical = allKeys.filter(k => !priorityFieldsOrder.includes(k.toLowerCase()))
+    const priority = allKeys.filter(k => priorityFields.includes(k.toLowerCase()))
+    const technical = allKeys.filter(k => !priorityFields.includes(k.toLowerCase()))
 
     return (
-      <div className="mb-8">
+      <div className="mb-8" id="comparison-table">
         <div className="mb-6 bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 p-6 rounded-lg">
-          <h2 className="text-2xl font-bold text-blue-900 mb-2">Sealant Product Comparison</h2>
-          <p className="text-blue-700">
-            Comparing {products.length} sealant products - Differences are highlighted
-            {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
-          </p>
+          <h2 className="text-2xl font-bold text-blue-900 mb-2">Product Comparison</h2>
+          <p className="text-blue-700">Comparing {products.length} products - Differences are highlighted</p>
         </div>
-
-        {comparisonData.comparisonSummary && (
-          <div className="mb-6 bg-gradient-to-r from-purple-50 to-pink-50 border-l-4 border-purple-500 rounded-lg overflow-hidden shadow-lg">
-            <div className="p-6">
-              <div className="flex items-start mb-4">
-                <div className="flex-shrink-0">
-                  <svg className="h-8 w-8 text-purple-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                  </svg>
-                </div>
-                <div className="ml-4 flex-1">
-                  <h3 className="text-xl font-bold text-purple-900 mb-2">AI Comparison Analysis</h3>
-                  <p className="text-purple-700 text-sm">
-                    Detailed comparison of {products.length} products
-                  </p>
-                </div>
-              </div>
-              
-              <div className="prose prose-purple max-w-none">
-                <div 
-                  className="text-gray-800 leading-relaxed"
-                  dangerouslySetInnerHTML={{ __html: renderMarkdown(comparisonData.comparisonSummary, 'purple') }}
-                />
-              </div>
-            </div>
-          </div>
-        )}
 
         <div className="bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200">
           <div className="overflow-x-auto">
@@ -565,10 +370,7 @@ export default function Home() {
                       className="px-6 py-4 text-left text-sm font-semibold"
                       style={{ color: '#0078a9' }}
                     >
-                      <div className="font-bold">{product.sku || product.Product_Name || product.name || `Product ${idx + 1}`}</div>
-                      {product.family && (
-                        <div className="text-xs font-normal text-gray-600 mt-1">Family: {product.family}</div>
-                      )}
+                      Product {idx + 1}
                     </th>
                   ))}
                 </tr>
@@ -644,64 +446,8 @@ export default function Home() {
 
         <div className="mt-4 flex items-center gap-2 text-sm text-gray-600">
           <span className="inline-block w-3 h-3 bg-yellow-50 border border-yellow-200 rounded"></span>
-          <span>Highlighted rows indicate differences between sealant products</span>
+          <span>Highlighted rows indicate differences between products</span>
         </div>
-      </div>
-    )
-  }
-
-  const renderLookupSummary = () => {
-    if (!specificAnswer || comparisonData || analyticalData || metaQuestionData) return null
-
-    return (
-      <div className="mb-8">
-        <div className="bg-gradient-to-r from-green-50 to-emerald-50 border-l-4 border-green-500 rounded-lg overflow-hidden shadow-lg">
-          <div className="p-6">
-            <div className="flex items-start mb-4">
-              <div className="flex-shrink-0">
-                <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                </svg>
-              </div>
-              <div className="ml-4 flex-1">
-                <h2 className="text-2xl font-bold text-green-900 mb-2">AI Analysis</h2>
-                <p className="text-green-700 text-sm">
-                  Based on analysis of {specificAnswer.count} sealant product(s)
-                  {searchTime && <span className="ml-2">• Completed in {searchTime}s</span>}
-                </p>
-              </div>
-            </div>
-            
-            <div className="prose prose-green max-w-none">
-              <div 
-                className="text-gray-800 leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: renderMarkdown(specificAnswer.summary || specificAnswer.answer, 'green') }}
-              />
-            </div>
-          </div>
-        </div>
-
-        {specificAnswer.count > 0 && (
-          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <svg className="h-5 w-5 text-blue-600 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span className="text-sm font-medium text-blue-900">
-                  {specificAnswer.count} sealant product reference{specificAnswer.count !== 1 ? 's' : ''} available below
-                </span>
-              </div>
-              <button
-                onClick={scrollToProducts}
-                className="relative z-10 text-sm font-medium text-blue-600 hover:text-blue-800 hover:underline focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 rounded px-3 py-1 transition-all cursor-pointer"
-                type="button"
-              >
-                View Details →
-              </button>
-            </div>
-          </div>
-        )}
       </div>
     )
   }
@@ -713,7 +459,7 @@ export default function Home() {
           Sealants Smart Search
         </h1>
         <p className="text-center text-gray-600 mb-8">
-          Search sealant products using natural language • Powered by AI
+          Search products using natural language
         </p>
 
         <form onSubmit={handleSearch}>
@@ -722,7 +468,7 @@ export default function Home() {
               type="text"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ask anything... (e.g., 'Best sealant for firewall', 'Compare PS 870 vs PR-1422', 'Tell me about PS 870')"
+              placeholder="Ask anything... (e.g., 'Why use Korotherm sealant?', 'Compare PS 870 vs PR-148')"
               className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#0078a9] focus:border-transparent"
             />
             <button
@@ -877,121 +623,170 @@ export default function Home() {
         </form>
       </div>
 
-      {loading && (
-        <div className="text-center py-12 bg-white rounded-lg border border-gray-200 shadow-sm">
-          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#0078a9] mb-4"></div>
-          <p className="text-lg font-medium text-gray-700">Searching sealant products...</p>
-          {searchProgress && (
-            <p className="mt-2 text-sm text-gray-600">{searchProgress}</p>
-          )}
-          <p className="mt-2 text-xs text-gray-400">Optimized search • Typically completes in 2-5 seconds</p>
+      {error && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-lg">
+          <strong>Error:</strong> {error}
         </div>
       )}
 
-      {error && (
-        <div className="bg-red-50 border-l-4 border-red-500 p-6 rounded-lg shadow-sm">
-          <div className="flex items-center">
-            <svg className="h-6 w-6 text-red-500 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <div>
-              <h3 className="text-lg font-semibold text-red-800">Search Error</h3>
-              <p className="text-red-700 mt-1">{error}</p>
+      {analyticalData && renderAnalyticalSummary()}
+
+      {comparisonData && comparisonData.comparisonSummary && renderComparisonSummary()}
+
+      {comparisonData && renderComparison()}
+
+      {specificAnswer && (
+        <div className="mb-6 bg-blue-50 border-l-4 border-blue-500 p-6 rounded-lg">
+          <div className="flex items-start">
+            <div className="flex-shrink-0">
+              <svg className="h-6 w-6 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+            </div>
+            <div className="ml-3 flex-1">
+              <h3 className="text-lg font-semibold text-blue-900 mb-2">Answer</h3>
+              <p className="text-green-800 text-lg">{specificAnswer.answer}</p>
+              
+              {specificAnswer.extractedData && Object.keys(specificAnswer.extractedData).length > 0 && (
+                <div className="mt-4 bg-white rounded-lg p-4 border border-blue-200">
+                  <h4 className="font-semibold text-sm text-blue-900 mb-2">Extracted Information:</h4>
+                  <div className="space-y-1">
+                    {Object.entries(specificAnswer.extractedData).map(([key, value]) => (
+                      <div key={key} className="text-sm">
+                        <span className="font-medium text-gray-700">{formatFieldName(key)}:</span>{' '}
+                        <span className="text-gray-900">{String(value)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {!loading && !error && hasSearched && (
-        <>
-          {renderMetaSummary()}
-          {renderAnalyticalSummary()}
-          {renderLookupSummary()}
-          {renderComparison()}
+      {results.length > 0 && !comparisonData && (
+        <div id="product-references">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="text-2xl font-semibold" style={{ color: '#0078a9' }}>
+              {analyticalData ? 'Product References' : specificAnswer ? 'Full Product Details' : `Found ${results.length} ${results.length === 1 ? 'result' : 'results'}`}
+            </h2>
+            {analyticalData && (
+              <span className="text-sm text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
+                {results.length} product{results.length !== 1 ? 's' : ''} analyzed
+              </span>
+            )}
+          </div>
 
-          {results.length > 0 && !comparisonData && (
-            <div id="product-references" className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold" style={{ color: '#0078a9' }}>
-                  {analyticalData || metaQuestionData ? 'Product References' : 'Search Results'}
-                </h2>
-                <div className="flex items-center gap-4">
-                  {searchTime && (
-                    <span className="text-sm text-gray-500">
-                      ⚡ {searchTime}s
-                    </span>
+          <div className="space-y-6">
+            {results.map((product, index) => {
+              const { header, other } = groupAttributes(product)
+              
+              return (
+                <div
+                  key={index}
+                  className="bg-white border border-gray-200 rounded-lg overflow-hidden hover:shadow-lg transition-shadow"
+                >
+                  {Object.keys(header).length > 0 && (
+                    <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-b-2 border-blue-200 p-6">
+                      {Object.entries(header).map(([key, value]) => {
+                        const lowerKey = key.toLowerCase()
+                        
+                        if (lowerKey === 'sku') {
+                          return (
+                            <div key={key} className="mb-3">
+                              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">SKU</span>
+                              <h3 className="text-2xl font-bold mt-1" style={{ color: '#0078a9' }}>
+                                {String(value)}
+                              </h3>
+                            </div>
+                          )
+                        }
+                        
+                        if (lowerKey === 'name' || lowerKey === 'product_name' || lowerKey === 'productname') {
+                          return (
+                            <div key={key} className="mb-3">
+                              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Product Name</span>
+                              <h4 className="text-xl font-semibold text-gray-900 mt-1">
+                                {String(value)}
+                              </h4>
+                            </div>
+                          )
+                        }
+                        
+                        if (lowerKey === 'description' || lowerKey === 'product_description') {
+                          return (
+                            <div key={key} className="mt-3">
+                              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Description</span>
+                              <p className="text-gray-700 mt-1 leading-relaxed">
+                                {String(value)}
+                              </p>
+                            </div>
+                          )
+                        }
+                        
+                        return null
+                      })}
+                    </div>
                   )}
-                  <span className="px-4 py-2 bg-blue-100 text-blue-800 rounded-full text-sm font-semibold">
-                    {results.length} {results.length === 1 ? 'Product' : 'Products'}
-                  </span>
-                </div>
-              </div>
 
-              <div className="space-y-6">
-                {results.map((product, index) => {
-                  const { header, other } = groupAttributes(product)
-                  
-                  return (
-                    <div 
-                      key={index} 
-                      className="border border-gray-200 rounded-lg p-6 hover:shadow-md transition-shadow bg-gray-50"
-                    >
-                      <div className="mb-4 pb-4 border-b border-gray-300">
-                        {Object.entries(header).map(([key, value]) => (
-                          <div key={key} className="mb-2">
-                            <span className="font-bold text-lg" style={{ color: '#0078a9' }}>
-                              {formatFieldName(key)}:
-                            </span>
-                            <span 
-                              className="ml-2 text-gray-800 text-lg"
-                              dangerouslySetInnerHTML={{ __html: formatValue(key, value) }}
-                            />
-                          </div>
-                        ))}
-                        {product._sourceTable && (
-                          <div className="mt-2">
-                            <span className="inline-block px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-xs font-semibold">
-                              Found in: {product._sourceTable}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
+                  {Object.keys(other).length > 0 && (
+                    <div className="p-6">
+                      <h4 className="text-lg font-semibold mb-4" style={{ color: '#0078a9' }}>
+                        Technical Specifications
+                      </h4>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {Object.entries(other).map(([key, value]) => (
-                          <div key={key} className="flex flex-col">
-                            <span className="text-sm font-semibold text-gray-600 mb-1">
+                          <div 
+                            key={key} 
+                            className="border-l-2 border-gray-200 pl-4 py-2 hover:border-blue-400 transition-colors"
+                          >
+                            <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
                               {formatFieldName(key)}
-                            </span>
-                            <span 
-                              className="text-sm text-gray-800 bg-white p-2 rounded border border-gray-200 whitespace-pre-wrap"
-                              dangerouslySetInnerHTML={{ __html: formatValue(key, value) }}
-                            />
+                            </div>
+                            <div className="text-sm text-gray-900 font-medium">
+                              {formatValue(key, value)}
+                            </div>
                           </div>
                         ))}
                       </div>
                     </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
+                  )}
 
-          {!loading && !error && hasSearched && results.length === 0 && !analyticalData && !metaQuestionData && !specificAnswer && (
-            <div className="text-center py-12 bg-white rounded-lg border border-gray-200 shadow-sm">
-              <svg className="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <h3 className="text-xl font-semibold text-gray-700 mb-2">No Products Found</h3>
-              <p className="text-gray-600 mb-4">
-                We couldn&apos;t find any sealant products matching your search.
-              </p>
-              <p className="text-sm text-gray-500">
-                Try adjusting your search terms or filters, or browse all products.
-              </p>
-            </div>
+                  {Object.keys(header).length === 0 && Object.keys(other).length === 0 && (
+                    <div className="p-6 text-center text-gray-500">
+                      No displayable data available for this product
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {loading && (
+        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-[#0078a9]"></div>
+          <p className="mt-4 text-gray-600">Searching products...</p>
+          {query && (
+            <p className="mt-2 text-sm text-gray-500">
+              You are searching: <span className="font-semibold" style={{ color: '#0078a9' }}>{query}</span>
+            </p>
           )}
-        </>
+        </div>
+      )}
+
+      {!loading && hasSearched && !error && results.length === 0 && !specificAnswer && !comparisonData && !analyticalData && (
+        <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+          <svg className="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <h3 className="mt-4 text-lg font-medium text-gray-900">No results found</h3>
+          <p className="mt-2 text-sm text-gray-500">
+            Try adjusting your search query or filters
+          </p>
+        </div>
       )}
     </main>
   )
